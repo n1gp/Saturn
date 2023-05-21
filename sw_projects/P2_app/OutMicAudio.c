@@ -174,6 +174,17 @@ void *OutgoingMicSamples(void *arg)
                 perror("sendmsg, Mic Audio");
                 InitError=true;
             }
+            if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
+	    {
+              memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // create local copy of PC destination address
+              Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+              if(Error == -1)
+              {
+                  perror("sendmsg 2nd client, Mic Audio");
+                  InitError=true;
+              }
+	    }
+            memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // create local copy of PC destination address
         }
     }
 //

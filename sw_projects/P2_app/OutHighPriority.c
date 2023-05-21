@@ -134,6 +134,21 @@ void *OutgoingHighPriority(void *arg)
         printf("socket id = %d\n", ThreadData -> Socketid);
         InitError=true;
       }
+
+      if(SDRActive2)
+      {
+        memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
+        Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+
+        if(Error == -1)
+        {
+          printf("High Priority Send Error to 2nd client, errno=%d\n", errno);
+          printf("socket id = %d\n", ThreadData -> Socketid);
+          InitError=true;
+        }
+      }
+      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
+
       if(MOXAsserted)
         usleep(1000);
       else

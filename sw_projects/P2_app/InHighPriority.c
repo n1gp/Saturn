@@ -108,8 +108,8 @@ void *IncomingHighPriority(void *arg)                   // listener thread
 //
 // now properly decode DDC frequencies
 //
-      int lower = (DDCupper)?5:0;
-      int upper = (DDCupper)?VNUMDDC:5;
+      int lower = (DDCupper)?4:0;
+      int upper = (DDCupper)?VNUMDDC:4;
       for(i=lower; i<upper; i++)
       {
         LongWord = ntohl(*(uint32_t *)(UDPInBuffer+(i-lower)*4+9));

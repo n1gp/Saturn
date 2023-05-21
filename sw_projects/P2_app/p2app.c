@@ -280,7 +280,7 @@ void* CheckForActivity(void *arg)
       StartBitReceived = false;
       if(PreviouslyActiveState) {
         SDRIP = 0;
-        for(i=0; i<VNUMDDC/2; i++)            // disable lower bank of DDCs
+        for(i=0; i<VNUMDDC-6; i++)            // disable lower bank of DDCs
           SetP2SampleRate(i, false, 48, false);
         WriteP2DDCRateRegister();
         printf("Reverted to Inactive State for 1st client after no activity\n");
@@ -296,7 +296,7 @@ void* CheckForActivity(void *arg)
       StartBitReceived = false;
       if(PreviouslyActiveState2) {
         SDRIP2 = 0;
-        for(i=5; i<VNUMDDC; i++)               // disable upper bank of DDCs
+        for(i=4; i<VNUMDDC; i++)               // disable upper bank of DDCs
           SetP2SampleRate(i, false, 48, false);
         WriteP2DDCRateRegister();
         printf("Reverted to Inactive State for 2nd client after no activity\n");
@@ -350,7 +350,7 @@ int main(int argc, char *argv[])
     38,                                           // protocol version 3.8
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
-    5,                                            // 5DDC
+    4,                                            // 4DDC
     1,                                            // phase word
     0,                                            // endian mode
     0,0,                                          // beta version, reserved byte (total 25 useful bytes)
@@ -708,6 +708,7 @@ int main(int argc, char *argv[])
           {
             printf("Multiple clients on the same subnet currently not allowed! CUrrentSDR:%x SDRIP:%x\n", CurrentSDR, SDRIP);
           } else {
+            DiscoveryReply[20] = (SDRActive) ? 6 : 4; //1st client 4RX, 2nd 6RX
             memset(&UDPInBuffer, 0, VDISCOVERYREPLYSIZE);
             memcpy(&UDPInBuffer, DiscoveryReply, VDISCOVERYREPLYSIZE);
             sendto(SocketData[0].Socketid, &UDPInBuffer, VDISCOVERYREPLYSIZE, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));

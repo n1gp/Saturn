@@ -389,8 +389,8 @@ void *OutgoingDDCIQ(void *arg)
         //
             for (DDC = 0; DDC < VNUMDDC; DDC++)
             {
-                if(!SDRActive && DDC < 5) SequenceCounter[DDC] = 0;
-                if(!SDRActive2 && DDC > 4) SequenceCounter[DDC] = 0;
+                if(!SDRActive && DDC < 4) SequenceCounter[DDC] = 0;
+                if(!SDRActive2 && DDC > 3) SequenceCounter[DDC] = 0;
 
                 while ((IQHeadPtr[DDC] - IQReadPtr[DDC]) > VIQBYTESPERFRAME)
                 {
@@ -406,10 +406,10 @@ void *OutgoingDDCIQ(void *arg)
                     IQReadPtr[DDC] += VIQBYTESPERFRAME;
 
                     // local copy of PC destination address (reply_addr is global)
-                    memcpy(&DestAddr[DDC], (DDC<5)?&reply_addr:&reply_addr2, sizeof(struct sockaddr_in));
+                    memcpy(&DestAddr[DDC], (DDC<4)?&reply_addr:&reply_addr2, sizeof(struct sockaddr_in));
 
                     int Error;
-                    int DDCfake = (DDC<5)?DDC:DDC-5; // use lower ports for all DDCs since thats what the clients expect
+                    int DDCfake = (DDC<4)?DDC:DDC-4; // use lower ports for all DDCs since thats what the clients expect
                     Error = sendmsg((ThreadData+DDCfake)->Socketid, &datagram[DDC], 0);
 
                     if (Error == -1)

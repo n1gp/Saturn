@@ -107,8 +107,8 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
       // be aware an interleaved "odd" DDC will usually be set to disabled, and we need to revert this!
       //
       Word = *(uint16_t*)(UDPInBuffer + 7);                 // get DDC enables 15:0 (note it is already low byte 1st!)
-      int lower = (DDCupper)?5:0;
-      int upper = (DDCupper)?VNUMDDC:5;
+      int lower = (DDCupper)?4:0;
+      int upper = (DDCupper)?VNUMDDC:4;
       for(i=lower; i<upper; i++)
       {
         Enabled = (bool)(Word & 1);                        // get enable state
