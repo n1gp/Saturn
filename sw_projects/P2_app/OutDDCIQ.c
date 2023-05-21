@@ -364,7 +364,6 @@ void *OutgoingDDCIQ(void *arg)
         for (DDC = 0; DDC < VNUMDDC; DDC++)
         {
             SequenceCounter[DDC] = 0;
-            memcpy(&DestAddr[DDC], &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address (reply_addr is global)
             memset(&iovecinst[DDC], 0, sizeof(struct iovec));
             memset(&datagram[DDC], 0, sizeof(struct msghdr));
             iovecinst[DDC].iov_base = UDPBuffer[DDC];
@@ -380,7 +379,7 @@ void *OutgoingDDCIQ(void *arg)
         printf("outDDCIQ: enable data transfer\n");
         SetRXDDCEnabled(true);
         HeaderFound = false;
-        while(!InitError && SDRActive)
+        while(!InitError && (SDRActive || SDRActive2))
         {
 
         //
@@ -390,6 +389,9 @@ void *OutgoingDDCIQ(void *arg)
         //
             for (DDC = 0; DDC < VNUMDDC; DDC++)
             {
+                if(!SDRActive && DDC < 5) SequenceCounter[DDC] = 0;
+                if(!SDRActive2 && DDC > 4) SequenceCounter[DDC] = 0;
+
                 while ((IQHeadPtr[DDC] - IQReadPtr[DDC]) > VIQBYTESPERFRAME)
                 {
 //                    printf("enough data for packet: DDC= %d\n", DDC);
@@ -403,12 +405,16 @@ void *OutgoingDDCIQ(void *arg)
                     memcpy(UDPBuffer[DDC] + 16, IQReadPtr[DDC], VIQBYTESPERFRAME);
                     IQReadPtr[DDC] += VIQBYTESPERFRAME;
 
+                    // local copy of PC destination address (reply_addr is global)
+                    memcpy(&DestAddr[DDC], (DDC<5)?&reply_addr:&reply_addr2, sizeof(struct sockaddr_in));
+
                     int Error;
-                    Error = sendmsg((ThreadData+DDC)->Socketid, &datagram[DDC], 0);
+                    int DDCfake = (DDC<5)?DDC:DDC-5; // use lower ports for all DDCs since thats what the clients expect
+                    Error = sendmsg((ThreadData+DDCfake)->Socketid, &datagram[DDC], 0);
 
                     if (Error == -1)
                     {
-                        printf("Send Error, DDC=%d, errno=%d, socket id = %d\n", DDC, errno, (ThreadData+DDC)->Socketid);
+                        printf("Send Error, DDC=%d, errno=%d, socket id = %d\n", DDC, errno, (ThreadData+DDCfake)->Socketid);
                         InitError = true;
                     }
                 }
@@ -488,7 +494,7 @@ void *OutgoingDDCIQ(void *arg)
             {
                 if(*(DMAReadPtr + 7) != 0x80)
                 {
-                    printf("header not found for rate word at addr %x\n", DMAReadPtr);
+                    printf("header not found for rate word at addr %hhn\n", DMAReadPtr);
                     exit(1);
                 }
                 else                                                                    // analyse word, then process

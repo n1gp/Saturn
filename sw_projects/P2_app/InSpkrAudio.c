@@ -52,7 +52,9 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
     struct iovec iovecinst;                               // iovcnt buffer - 1 for each outgoing buffer
     struct msghdr datagram;                               // multiple incoming message header
     int size;                                             // UDP datagram length
+    int DDCupper;
 
+    extern int SDRIP, SDRIP2;
 //
 // variables for DMA buffer 
 //
@@ -117,7 +119,17 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
         }
         if(size == VSPEAKERAUDIOSIZE)                           // we have received a packet!
         {
-            NewMessageReceived = true;
+            if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+              continue; // stray msg from inactive client
+
+            DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+            if (DDCupper)
+            {
+              NewMessageReceived2 = true;
+	      continue;		// skip for 2nd client
+            }
+            else
+              NewMessageReceived = true;
             RegVal += 1;            //debug
             Depth = ReadFIFOMonitorChannel(eSpkCodecDMA, &FIFOOverflow);        // read the FIFO free locations
 //            printf("speaker packet received; depth = %d\n", Depth);

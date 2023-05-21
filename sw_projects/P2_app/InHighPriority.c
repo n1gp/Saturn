@@ -45,6 +45,9 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   uint32_t LongWord;
   uint16_t Word;
   int i;                                                // counter
+  int DDCupper;
+
+  extern uint32_t SDRIP, SDRIP2;
 
   ThreadData = (struct ThreadSocketData *)arg;
   ThreadData->Active = true;
@@ -68,41 +71,56 @@ void *IncomingHighPriority(void *arg)                   // listener thread
     {
       perror("recvfrom, high priority");
       printf("error number = %d\n", errno);
-      return EXIT_FAILURE;
+      return NULL;
     }
-
     //
     // if correct packet, process it
     //
     if(size == VHIGHPRIOTIYTOSDRSIZE)
     {
-      NewMessageReceived = true;
       printf("high priority packet received\n");
-      Byte = (uint8_t)(UDPInBuffer[4]);
-      RunBit = (bool)(Byte&1);
-      if(RunBit)
-      {
-        StartBitReceived = true;
-        if(ReplyAddressSet && StartBitReceived)
-          SDRActive = true;                                       // only set active if we have replay address too
-      }
+      if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+        continue; // stray msg from inactive client
+
+      DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+      if (DDCupper)
+        NewMessageReceived2 = true;
       else
       {
-        SDRActive = false;                                       // set state of whole app
-        printf("set to inactive by client app\n");
-        StartBitReceived = false;
+        NewMessageReceived = true;
+        Byte = (uint8_t)(UDPInBuffer[4]);
+        RunBit = (bool)(Byte&1);
+        if(RunBit)
+        {
+          StartBitReceived = true;
+          if(ReplyAddressSet && StartBitReceived)
+            SDRActive = true;                                       // only set active if we have replay address too
+        }
+        else
+        {
+          SDRActive = false;                                       // set state of whole app
+          SDRIP = 0;
+          printf("set to inactive by client app\n");
+          StartBitReceived = false;
+        }
       }
-      IsTXMode = (bool)(Byte&2);
-      SetMOX(IsTXMode);
 
 //
 // now properly decode DDC frequencies
 //
-      for (i=0; i<VNUMDDC; i++)
+      int lower = (DDCupper)?5:0;
+      int upper = (DDCupper)?VNUMDDC:5;
+      for(i=lower; i<upper; i++)
       {
-        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+i*4+9));
+        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+(i-lower)*4+9));
         SetDDCFrequency(i, LongWord, true);                   // temporarily set above
       }
+
+      if(DDCupper) continue; // skip below for 2nd client
+
+      IsTXMode = (bool)(Byte&2);
+      SetMOX(IsTXMode);
+
       //
       // DUC frequency & drive level
       //

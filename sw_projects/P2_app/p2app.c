@@ -60,16 +60,23 @@ extern sem_t RFGPIOMutex;                   // protect access to RF GPIO registe
 extern sem_t CodecRegMutex;                 // protect writes to codec
 
 struct sockaddr_in reply_addr;              // destination address for outgoing data
+struct sockaddr_in reply_addr2;
 
 bool IsTXMode;                              // true if in TX
 bool SDRActive;                             // true if this SDR is running at the moment
+bool SDRActive2;
 bool ReplyAddressSet = false;               // true when reply address has been set
+bool ReplyAddressSet2 = false;
 bool StartBitReceived = false;              // true when "run" bit has been set
 bool NewMessageReceived = false;            // set whenever a message is received
+bool NewMessageReceived2 = false;
 bool ExitRequested = false;                 // true if "exit checking" thread requests shutdown
 bool SkipExitCheck = false;                 // true to skip "exit checking", if running as a service
 bool ThreadError = false;                   // true if a thread reports an error
 
+uint32_t SDRIP = 0;
+uint32_t SDRIP2 = 0;
+uint32_t CurrentSDR;
 
 #define SDRBOARDID 1                        // Hermes
 #define SDRSWVERSION 1                      // version of this software
@@ -233,6 +240,8 @@ int MakeSocket(struct ThreadSocketData* Ptr, int DDCid)
 void* CheckForExitCommand(void *arg)
 {
   char ch;
+  (void)arg; // squelch compiler warning
+
   printf("spinning up Check For Exit thread\n");
   
   while (1)
@@ -245,6 +254,7 @@ void* CheckForExitCommand(void *arg)
       break;
     }
   }
+  return NULL;
 }
 
 
@@ -254,7 +264,11 @@ void* CheckForExitCommand(void *arg)
 //
 void* CheckForActivity(void *arg)
 {
-  bool PreviouslyActiveState;               
+  bool PreviouslyActiveState;
+  bool PreviouslyActiveState2;
+  int i;
+  (void)arg; // squelch compiler warning
+
   while(1)
   {
     sleep(1);                               // wait for 1 second
@@ -264,11 +278,33 @@ void* CheckForActivity(void *arg)
       SDRActive = false;                    // set back to inactive
       ReplyAddressSet = false;
       StartBitReceived = false;
-      if(PreviouslyActiveState)
-        printf("Reverted to Inactive State after no activity\n");
+      if(PreviouslyActiveState) {
+        SDRIP = 0;
+        for(i=0; i<VNUMDDC/2; i++)            // disable lower bank of DDCs
+          SetP2SampleRate(i, false, 48, false);
+        WriteP2DDCRateRegister();
+        printf("Reverted to Inactive State for 1st client after no activity\n");
+      }
     }
     NewMessageReceived = false;
+
+    PreviouslyActiveState2 = SDRActive2;
+    if (!NewMessageReceived2)                // if no messages received,
+    {
+      SDRActive2 = false;                    // set back to inactive
+      ReplyAddressSet2 = false;
+      StartBitReceived = false;
+      if(PreviouslyActiveState2) {
+        SDRIP2 = 0;
+        for(i=5; i<VNUMDDC; i++)               // disable upper bank of DDCs
+          SetP2SampleRate(i, false, 48, false);
+        WriteP2DDCRateRegister();
+        printf("Reverted to Inactive State for 2nd client after no activity\n");
+      }
+    }
+    NewMessageReceived2 = false;
   }
+  return NULL;
 }
 
 
@@ -314,7 +350,7 @@ int main(int argc, char *argv[])
     38,                                           // protocol version 3.8
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
-    4,                                            // 4DDC
+    5,                                            // 5DDC
     1,                                            // phase word
     0,                                            // endian mode
     0,0,                                          // beta version, reserved byte (total 25 useful bytes)
@@ -465,8 +501,8 @@ int main(int argc, char *argv[])
       perror("pthread_create check for exit");
       return EXIT_FAILURE;
     }
+    pthread_detach(CheckForExitThread);
   }
-  pthread_detach(CheckForExitThread);
 
   //
   // create socket for incoming data on the command port
@@ -534,9 +570,6 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
   pthread_detach(MicThread);
-
-
-
 
 
 //
@@ -612,9 +645,8 @@ int main(int argc, char *argv[])
 // (that means we can't handle the programming packet but we don't use that anyway)
 //
     CmdByte = UDPInBuffer[4];
-    if(size==VDISCOVERYSIZE)  
+    if(size==VDISCOVERYSIZE)
     {
-      NewMessageReceived = true;
       switch(CmdByte)
       {
         //
@@ -622,17 +654,43 @@ int main(int argc, char *argv[])
         //
         case 0:
           printf("P2 General packet to SDR, size= %d\n", size);
+          CurrentSDR = *(uint32_t *)&addr_from.sin_addr.s_addr;
+          if(SDRIP == CurrentSDR)
+	    NewMessageReceived = true;
+          else if(SDRIP2 == CurrentSDR)
+            NewMessageReceived2 = true;
+
           //
           // get "from" MAC address and port; this is where the data goes back to
           //
-          memset(&reply_addr, 0, sizeof(reply_addr));
-          reply_addr.sin_family = AF_INET;
-          reply_addr.sin_addr.s_addr = addr_from.sin_addr.s_addr;
-          reply_addr.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
-          HandleGeneralPacket(UDPInBuffer);
-          ReplyAddressSet = true;
-          if(ReplyAddressSet && StartBitReceived)
-            SDRActive = true;                                       // only set active if we have start bit too
+          if(!ReplyAddressSet)
+          {
+            if(SDRActive2 && SDRIP2 == CurrentSDR)
+              break; // mismatch, ignore
+            memset(&reply_addr, 0, sizeof(reply_addr));
+            reply_addr.sin_family = AF_INET;
+            reply_addr.sin_addr.s_addr = addr_from.sin_addr.s_addr;
+            reply_addr.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
+            SDRIP = *(uint32_t *)&reply_addr.sin_addr.s_addr;
+            HandleGeneralPacket(UDPInBuffer);
+            ReplyAddressSet = true;
+            if(ReplyAddressSet && StartBitReceived)
+              SDRActive = true;                                       // only set active if we have start bit too
+          }
+	  else if(!ReplyAddressSet2 && ReplyAddressSet)
+          {
+            memset(&reply_addr2, 0, sizeof(reply_addr2));
+            reply_addr2.sin_family = AF_INET;
+            reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
+            reply_addr2.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
+            if(SDRIP != *(uint32_t *)&reply_addr2.sin_addr.s_addr)
+            {
+              SDRIP2 = *(uint32_t *)&reply_addr2.sin_addr.s_addr;
+              ReplyAddressSet2 = true;
+            }
+            if(ReplyAddressSet2 && SDRActive)
+              SDRActive2 = true;                                       // only set active if we have start bit too
+          }
           break;
 
         //
@@ -640,14 +698,20 @@ int main(int argc, char *argv[])
         //
         case 2:
           printf("P2 Discovery packet\n");
-          if(SDRActive)
+          CurrentSDR = *(uint32_t *)&addr_from.sin_addr.s_addr;
+          if(SDRActive && SDRActive2)
             DiscoveryReply[4] = 3;                             // response 2 if not active, 3 if running
           else
             DiscoveryReply[4] = 2;                             // response 2 if not active, 3 if running
 
-          memset(&UDPInBuffer, 0, VDISCOVERYREPLYSIZE);
-          memcpy(&UDPInBuffer, DiscoveryReply, VDISCOVERYREPLYSIZE);
-          sendto(SocketData[0].Socketid, &UDPInBuffer, VDISCOVERYREPLYSIZE, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));
+          if (SDRActive && CurrentSDR == SDRIP)
+          {
+            printf("Multiple clients on the same subnet currently not allowed! CUrrentSDR:%x SDRIP:%x\n", CurrentSDR, SDRIP);
+          } else {
+            memset(&UDPInBuffer, 0, VDISCOVERYREPLYSIZE);
+            memcpy(&UDPInBuffer, DiscoveryReply, VDISCOVERYREPLYSIZE);
+            sendto(SocketData[0].Socketid, &UDPInBuffer, VDISCOVERYREPLYSIZE, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));
+          }
           break;
 
         case 3:

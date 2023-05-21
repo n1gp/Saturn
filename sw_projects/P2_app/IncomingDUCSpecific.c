@@ -47,6 +47,9 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
     uint8_t SidetoneVolume;
     uint8_t CWRFDelay;
     uint16_t CWHangDelay;
+    int DDCupper;
+
+    extern uint32_t SDRIP, SDRIP2;
 
     ThreadData = (struct ThreadSocketData *)arg;
     ThreadData->Active = true;
@@ -68,12 +71,22 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
       if(size < 0 && errno != EAGAIN)
       {
           perror("recvfrom, DUC specific");
-          return EXIT_FAILURE;
+          return NULL;
       }
       if(size == VDUCSPECIFICSIZE)
       {
-          NewMessageReceived = true;
-          printf("DUC packet received\n");
+          printf("DUC specific packet received\n");
+	  if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+            continue; // stray msg from inactive client
+
+          DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+          if (DDCupper)
+          {
+            NewMessageReceived2 = true;
+            continue;		// skip below for 2nd client
+          }
+          else
+            NewMessageReceived = true;
 // iambic settings
           IambicSpeed = *(uint8_t*)(UDPInBuffer+9);               // keyer speed
           IambicWeight = *(uint8_t*)(UDPInBuffer+10);             // keyer weight

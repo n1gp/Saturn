@@ -47,6 +47,9 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
   uint16_t Word, Word2;                                 // 16 bit read value
   int i;                                                // counter
   EADCSelect ADC = eADC1;                               // ADC to use for a DDC
+  int DDCupper;
+
+  extern uint32_t SDRIP, SDRIP2;
 
   ThreadData = (struct ThreadSocketData *)arg;
   ThreadData->Active = true;
@@ -68,25 +71,34 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
     if(size < 0 && errno != EAGAIN)
     {
       perror("recvfrom, DDC Specific");
-      return EXIT_FAILURE;
+      return NULL;
     }
     if(size == VDDCSPECIFICSIZE)
     {
-      NewMessageReceived = true;
       printf("DDC specific packet received\n");
-      // get ADC details:
-      Byte1 = *(uint8_t*)(UDPInBuffer+4);                   // get ADC count
-      SetADCCount(Byte1);
-      Byte1 = *(uint8_t*)(UDPInBuffer+5);                   // get ADC Dither bits
-      Byte2 = *(uint8_t*)(UDPInBuffer+6);                   // get ADC Random bits
-      Dither  = (bool)(Byte1&1);
-      Random  = (bool)(Byte2&1);
-      SetADCOptions(eADC1, false, Dither, Random);          // ADC1 settings
-      Byte1 = Byte1 >> 1;                                   // move onto ADC bits
-      Byte2 = Byte2 >> 1;
-      Dither  = (bool)(Byte1&1);
-      Random  = (bool)(Byte2&1);
-      SetADCOptions(eADC2, false, Dither, Random);          // ADC2 settings
+      if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+         continue; // stray msg from inactive client
+
+      DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+      if (DDCupper)
+        NewMessageReceived2 = true;
+      else
+      {
+        NewMessageReceived = true;
+        // get ADC details:
+        Byte1 = *(uint8_t*)(UDPInBuffer+4);                   // get ADC count
+        SetADCCount(Byte1);
+        Byte1 = *(uint8_t*)(UDPInBuffer+5);                   // get ADC Dither bits
+        Byte2 = *(uint8_t*)(UDPInBuffer+6);                   // get ADC Random bits
+        Dither  = (bool)(Byte1&1);
+        Random  = (bool)(Byte2&1);
+        SetADCOptions(eADC1, false, Dither, Random);          // ADC1 settings
+        Byte1 = Byte1 >> 1;                                   // move onto ADC bits
+        Byte2 = Byte2 >> 1;
+        Dither  = (bool)(Byte1&1);
+        Random  = (bool)(Byte2&1);
+        SetADCOptions(eADC2, false, Dither, Random);          // ADC2 settings
+      }
       
       //
       // main settings for each DDC
@@ -95,13 +107,15 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
       // be aware an interleaved "odd" DDC will usually be set to disabled, and we need to revert this!
       //
       Word = *(uint16_t*)(UDPInBuffer + 7);                 // get DDC enables 15:0 (note it is already low byte 1st!)
-      for(i=0; i<VNUMDDC; i++)
+      int lower = (DDCupper)?5:0;
+      int upper = (DDCupper)?VNUMDDC:5;
+      for(i=lower; i<upper; i++)
       {
         Enabled = (bool)(Word & 1);                        // get enable state
-        Byte1 = *(uint8_t*)(UDPInBuffer+i*6+17);          // get ADC for this DDC
-        Word2 = *(uint16_t*)(UDPInBuffer+i*6+18);         // get sample rate for this DDC
+        Byte1 = *(uint8_t*)(UDPInBuffer+(i-lower)*6+17);          // get ADC for this DDC
+        Word2 = *(uint16_t*)(UDPInBuffer+(i-lower)*6+18);         // get sample rate for this DDC
         Word2 = ntohs(Word2);                             // swap byte order
-        Byte2 = *(uint8_t*)(UDPInBuffer+i*6+22);          // get sample size for this DDC
+        Byte2 = *(uint8_t*)(UDPInBuffer+(i-lower)*6+22);          // get sample size for this DDC
         SetDDCSampleSize(i, Byte2);
         if(Byte1 == 0)
           ADC = eADC1;

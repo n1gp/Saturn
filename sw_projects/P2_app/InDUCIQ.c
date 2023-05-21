@@ -51,6 +51,9 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
     struct iovec iovecinst;                               // iovcnt buffer - 1 for each outgoing buffer
     struct msghdr datagram;                               // multiple incoming message header
     int size;                                             // UDP datagram length
+    int DDCupper;
+
+    extern uint32_t SDRIP, SDRIP2;
 
                                                           //
 // variables for DMA buffer 
@@ -122,11 +125,22 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
         if(size < 0 && errno != EAGAIN)
         {
             perror("recvfrom fail, TX I/Q data");
-            return EXIT_FAILURE;
+            return NULL;
         }
         if(size == VDUCIQSIZE)
         {
-            NewMessageReceived = true;
+            //printf("DUC I/Q packet received\n");
+            if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+              continue; // stray msg from inactive client
+
+            DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+            if (DDCupper)
+            {
+              NewMessageReceived2 = true;
+              continue;		// skip below for 2nd client
+            }
+            else
+              NewMessageReceived = true;
             Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow);           // read the FIFO free locations
             while (Depth < VMEMWORDSPERFRAME)       // loop till space available
             {
