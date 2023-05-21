@@ -52,6 +52,7 @@ void *OutgoingMicSamples(void *arg)
     struct msghdr datagram;
     uint8_t UDPBuffer[VMICPACKETSIZE];                      // DDC frame buffer
     uint32_t SequenceCounter = 0;                           // UDP sequence count
+    uint32_t SequenceCounter2 = 0;
 
     struct ThreadSocketData* ThreadData;            // socket etc data for this thread
     struct sockaddr_in DestAddr;                    // destination address for outgoing data
@@ -141,6 +142,7 @@ void *OutgoingMicSamples(void *arg)
     //
         printf("starting activity on mic thread\n");
         SequenceCounter = 0;
+        SequenceCounter2 = 0;
         memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // create local copy of PC destination address
         memset(&iovecinst, 0, sizeof(struct iovec));
         memset(&datagram, 0, sizeof(datagram));
@@ -176,6 +178,7 @@ void *OutgoingMicSamples(void *arg)
             }
             if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
 	    {
+              *(uint32_t*)UDPBuffer = htonl(SequenceCounter2++);        // add sequence count
               memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // create local copy of PC destination address
               Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
               if(Error == -1)
@@ -184,6 +187,8 @@ void *OutgoingMicSamples(void *arg)
                   InitError=true;
               }
 	    }
+	    else
+              SequenceCounter2 = 0;
             memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // create local copy of PC destination address
         }
     }
