@@ -107,7 +107,6 @@ void *OutgoingHighPriority(void *arg)
     {
       // create the packet
       memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
-      *(uint32_t *)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
       ReadStatusRegister();
       Byte = (uint8_t)GetP2PTTKeyInputs();
       *(uint8_t *)(UDPBuffer+4) = Byte;
@@ -130,8 +129,9 @@ void *OutgoingHighPriority(void *arg)
       Byte = (uint8_t)GetUserIOBits();                  // user I/O bits
       *(uint8_t *)(UDPBuffer+59) = Byte;
 
-      if(1)//TXActive != 2)
+      if(TXActive != 2)
       {
+        *(uint32_t *)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
         Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
 
         if(Error == -1)
@@ -144,7 +144,7 @@ void *OutgoingHighPriority(void *arg)
 
       if(SDRActive2)
       {
-        if(1)//TXActive != 1)
+        if(TXActive != 1)
         {
           *(uint32_t *)UDPBuffer = htonl(SequenceCounter2++);
           memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address

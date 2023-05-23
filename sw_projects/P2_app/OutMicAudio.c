@@ -164,37 +164,37 @@ void *OutgoingMicSamples(void *arg)
                 usleep(1000);						        // 1ms wait
                 Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow);	// read the FIFO Depth register
             }
-
             DMAReadFromFPGA(DMAReadfile_fd, MicBasePtr, VDMATRANSFERSIZE, VADDRMICSTREAMREAD);
-            memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
 
-            if(1)//TXActive != 2)
+            // create the packet into UDPBuffer
+            *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
+            if(TXActive == 2)
+              memset(UDPBuffer+4, 0, VDMATRANSFERSIZE);       // copy in mic samples
+            else
+              memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
+            memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));
+            Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+            if(Error == -1)
             {
-              // create the packet into UDPBuffer
-              *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
-              memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));
-              Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
-              if(Error == -1)
-              {
-                  perror("sendmsg, Mic Audio");
-                  InitError=true;
-              }
+                perror("sendmsg, Mic Audio");
+                InitError=true;
             }
 
             if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
             {
-              if(1)//TXActive != 1)
+              *(uint32_t*)UDPBuffer = htonl(SequenceCounter2++);        // add sequence count
+              if(TXActive == 1)
+                memset(UDPBuffer+4, 0, VDMATRANSFERSIZE);       // copy in mic samples
+              else
+                memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
+              memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));
+              Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+              if(Error == -1)
               {
-                *(uint32_t*)UDPBuffer = htonl(SequenceCounter2++);        // add sequence count
-                memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));
-                Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
-                if(Error == -1)
-                {
-                    perror("sendmsg 2nd client, Mic Audio");
-                    InitError=true;
-                }
+                  perror("sendmsg 2nd client, Mic Audio");
+                  InitError=true;
               }
-	    }
+            }
 	    else
               SequenceCounter2 = 0;
         }
