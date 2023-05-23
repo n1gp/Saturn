@@ -108,22 +108,22 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
       //
       Word = *(uint16_t*)(UDPInBuffer + 7);                 // get DDC enables 15:0 (note it is already low byte 1st!)
       int lower = (DDCupper)?4:0;
-      int upper = (DDCupper)?VNUMDDC:4;
-      for(i=lower; i<upper; i++)
+      int upper = (DDCupper)?6:4;
+      for(i=0; i<upper; i++)
       {
         Enabled = (bool)(Word & 1);                        // get enable state
-        Byte1 = *(uint8_t*)(UDPInBuffer+(i-lower)*6+17);          // get ADC for this DDC
-        Word2 = *(uint16_t*)(UDPInBuffer+(i-lower)*6+18);         // get sample rate for this DDC
+        Byte1 = *(uint8_t*)(UDPInBuffer+i*6+17);          // get ADC for this DDC
+        Word2 = *(uint16_t*)(UDPInBuffer+i*6+18);         // get sample rate for this DDC
         Word2 = ntohs(Word2);                             // swap byte order
-        Byte2 = *(uint8_t*)(UDPInBuffer+(i-lower)*6+22);          // get sample size for this DDC
-        SetDDCSampleSize(i, Byte2);
+        Byte2 = *(uint8_t*)(UDPInBuffer+i*6+22);          // get sample size for this DDC
+        SetDDCSampleSize(i+lower, Byte2);
         if(Byte1 == 0)
           ADC = eADC1;
         else if(Byte1 == 1)
           ADC = eADC2;
         else if(Byte1 == 2)
           ADC = eTXSamples;
-        SetDDCADC(i, ADC);
+        SetDDCADC(i+lower, ADC);
 
         Interleaved = false;                                 // assume no synch
         // finally DDC synchronisation: my implementation it seems isn't what the spec intended!
@@ -187,7 +187,7 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
                 break;
 
         }
-        SetP2SampleRate(i, Enabled, Word2, Interleaved);
+        SetP2SampleRate(i+lower, Enabled, Word2, Interleaved);
         Word = Word >> 1;                                 // move onto next DDC enabled bit
       }
       // now set register, and see if any changes made; reuse Dither again

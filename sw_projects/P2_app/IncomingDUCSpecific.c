@@ -83,10 +83,14 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
           if (DDCupper)
           {
             NewMessageReceived2 = true;
-            continue;		// skip below for 2nd client
+            if(TXActive == 1) continue;
           }
           else
+          {
             NewMessageReceived = true;
+            if(TXActive == 2) continue;
+          }
+
 // iambic settings
           IambicSpeed = *(uint8_t*)(UDPInBuffer+9);               // keyer speed
           IambicWeight = *(uint8_t*)(UDPInBuffer+10);             // keyer weight

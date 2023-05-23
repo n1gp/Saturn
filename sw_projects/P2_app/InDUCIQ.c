@@ -37,6 +37,8 @@
 #define VBASE 0x1000								// DMA start at 4K into buffer
 #define VDMATRANSFERSIZE 1440                       // write 1 message at a time
 
+int TXActive = 0;   // The client actively transmitting, 0-none, 1-xdma, 2-network
+
 //
 // listener thread for incoming DUC I/Q packets
 // planned strategy: just DMA spkr data when available; don't copy and DMA a larger amount.
@@ -129,7 +131,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
         }
         if(size == VDUCIQSIZE)
         {
-            //printf("DUC I/Q packet received\n");
+            //printf("DUC I/Q packet received, DDCupper:%d TXActive:%d\n", DDCupper, TXActive);
             if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
               continue; // stray msg from inactive client
 
@@ -137,10 +139,14 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
             if (DDCupper)
             {
               NewMessageReceived2 = true;
-              continue;		// skip below for 2nd client
+              if(TXActive == 1) continue;
             }
             else
+            {
               NewMessageReceived = true;
+              if(TXActive == 2) continue;
+            }
+
             Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow);           // read the FIFO free locations
             while (Depth < VMEMWORDSPERFRAME)       // loop till space available
             {

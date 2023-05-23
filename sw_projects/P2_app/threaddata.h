@@ -77,8 +77,9 @@ extern bool ReplyAddressSet;                        // true when reply address h
 extern bool ReplyAddressSet2;
 extern bool StartBitReceived;                       // true when "run" bit has been set
 extern bool NewMessageReceived;                     // set whenever a message is received
-extern bool NewMessageReceived2;                     // set whenever a message is received
+extern bool NewMessageReceived2;                    // set whenever a message is received
 extern bool ThreadError;                            // set true if a thread reports an error
+extern int TXActive;                                // The client actively transmitting, 0-none, 1-SDRIP, 2-SDRIP2
 
 
 #define VBITCHANGEPORT 1                        // if set, thread must close its socket and open a new one on different port

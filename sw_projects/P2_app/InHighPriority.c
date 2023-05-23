@@ -47,6 +47,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   int i;                                                // counter
   int DDCupper;
 
+  extern int TXActive;
   extern uint32_t SDRIP, SDRIP2;
 
   ThreadData = (struct ThreadSocketData *)arg;
@@ -78,18 +79,35 @@ void *IncomingHighPriority(void *arg)                   // listener thread
     //
     if(size == VHIGHPRIOTIYTOSDRSIZE)
     {
-      printf("high priority packet received\n");
+      //printf("high priority packet received, DDCupper:%d TXActive:%d\n", DDCupper, TXActive);
       if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
         continue; // stray msg from inactive client
 
       DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+//
+// now properly decode DDC frequencies
+//
+      int lower = (DDCupper)?4:0;
+      int upper = (DDCupper)?VNUMDDC:4;
+      for(i=lower; i<upper; i++)
+      {
+        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+(i-lower)*4+9));
+        SetDDCFrequency(i, LongWord, true);                   // temporarily set above
+      }
+
+      Byte = (uint8_t)(UDPInBuffer[4]);
+      RunBit = (bool)(Byte&1);
+      IsTXMode = (bool)(Byte&2);
+
       if (DDCupper)
+      {
         NewMessageReceived2 = true;
+        if(TXActive == 1) continue;
+        TXActive = (IsTXMode)?2:0;
+      }
       else
       {
         NewMessageReceived = true;
-        Byte = (uint8_t)(UDPInBuffer[4]);
-        RunBit = (bool)(Byte&1);
         if(RunBit)
         {
           StartBitReceived = true;
@@ -103,22 +121,10 @@ void *IncomingHighPriority(void *arg)                   // listener thread
           printf("set to inactive by client app\n");
           StartBitReceived = false;
         }
+        if(TXActive == 2) continue;
+        TXActive = (IsTXMode)?1:0;
       }
 
-//
-// now properly decode DDC frequencies
-//
-      int lower = (DDCupper)?4:0;
-      int upper = (DDCupper)?VNUMDDC:4;
-      for(i=lower; i<upper; i++)
-      {
-        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+(i-lower)*4+9));
-        SetDDCFrequency(i, LongWord, true);                   // temporarily set above
-      }
-
-      if(DDCupper) continue; // skip below for 2nd client
-
-      IsTXMode = (bool)(Byte&2);
       SetMOX(IsTXMode);
 
       //

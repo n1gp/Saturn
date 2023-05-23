@@ -76,7 +76,7 @@ bool ThreadError = false;                   // true if a thread reports an error
 
 uint32_t SDRIP = 0;
 uint32_t SDRIP2 = 0;
-uint32_t CurrentSDR;
+uint32_t CurrentSDRIP;
 
 #define SDRBOARDID 1                        // Hermes
 #define SDRSWVERSION 1                      // version of this software
@@ -654,10 +654,10 @@ int main(int argc, char *argv[])
         //
         case 0:
           printf("P2 General packet to SDR, size= %d\n", size);
-          CurrentSDR = *(uint32_t *)&addr_from.sin_addr.s_addr;
-          if(SDRIP == CurrentSDR)
+          CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
+          if(SDRIP == CurrentSDRIP)
 	    NewMessageReceived = true;
-          else if(SDRIP2 == CurrentSDR)
+          else if(SDRIP2 == CurrentSDRIP)
             NewMessageReceived2 = true;
 
           //
@@ -665,7 +665,7 @@ int main(int argc, char *argv[])
           //
           if(!ReplyAddressSet)
           {
-            if(SDRActive2 && SDRIP2 == CurrentSDR)
+            if(SDRActive2 && SDRIP2 == CurrentSDRIP)
               break; // mismatch, ignore
             memset(&reply_addr, 0, sizeof(reply_addr));
             reply_addr.sin_family = AF_INET;
@@ -698,15 +698,15 @@ int main(int argc, char *argv[])
         //
         case 2:
           printf("P2 Discovery packet\n");
-          CurrentSDR = *(uint32_t *)&addr_from.sin_addr.s_addr;
+          CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
           if(SDRActive && SDRActive2)
             DiscoveryReply[4] = 3;                             // response 2 if not active, 3 if running
           else
             DiscoveryReply[4] = 2;                             // response 2 if not active, 3 if running
 
-          if (SDRActive && CurrentSDR == SDRIP)
+          if (SDRActive && CurrentSDRIP == SDRIP)
           {
-            printf("Multiple clients on the same subnet currently not allowed! CUrrentSDR:%x SDRIP:%x\n", CurrentSDR, SDRIP);
+            printf("Multiple clients with the same IP address currently not allowed! CurrentSDRIP:%x SDRIP:%x\n", CurrentSDRIP, SDRIP);
           } else {
             DiscoveryReply[20] = (SDRActive) ? 6 : 4; //1st client 4RX, 2nd 6RX
             memset(&UDPInBuffer, 0, VDISCOVERYREPLYSIZE);
