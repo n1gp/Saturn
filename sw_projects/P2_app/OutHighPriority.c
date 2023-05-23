@@ -106,6 +106,7 @@ void *OutgoingHighPriority(void *arg)
     while(SDRActive && !InitError)                               // main loop
     {
       // create the packet
+      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
       *(uint32_t *)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
       ReadStatusRegister();
       Byte = (uint8_t)GetP2PTTKeyInputs();
@@ -128,31 +129,37 @@ void *OutgoingHighPriority(void *arg)
 
       Byte = (uint8_t)GetUserIOBits();                  // user I/O bits
       *(uint8_t *)(UDPBuffer+59) = Byte;
-      Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
 
-      if(Error == -1)
+      if(1)//TXActive != 2)
       {
-        printf("High Priority Send Error, errno=%d\n", errno);
-        printf("socket id = %d\n", ThreadData -> Socketid);
-        InitError=true;
-      }
-
-      if(SDRActive2)
-      {
-        *(uint32_t *)UDPBuffer = htonl(SequenceCounter2++);
-        memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
         Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
 
         if(Error == -1)
         {
-          printf("High Priority Send Error to 2nd client, errno=%d\n", errno);
+          printf("High Priority Send Error, errno=%d\n", errno);
           printf("socket id = %d\n", ThreadData -> Socketid);
           InitError=true;
         }
       }
+
+      if(SDRActive2)
+      {
+        if(1)//TXActive != 1)
+        {
+          *(uint32_t *)UDPBuffer = htonl(SequenceCounter2++);
+          memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
+          Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+
+          if(Error == -1)
+          {
+            printf("High Priority Send Error to 2nd client, errno=%d\n", errno);
+            printf("socket id = %d\n", ThreadData -> Socketid);
+            InitError=true;
+          }
+        }
+      }
       else
         SequenceCounter2 = 0;
-      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
 
       if(MOXAsserted)
         usleep(1000);

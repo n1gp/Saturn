@@ -158,38 +158,45 @@ void *OutgoingMicSamples(void *arg)
             //
             // now wait until there is data, then DMA it
             //
-            Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow);			// read the FIFO Depth register. 4 mic words per 64 bit word.
+            Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow);	// read the FIFO Depth register. 4 mic words per 64 bit word.
             while (Depth < (VMICSAMPLESPERFRAME/4))			        // 16 locations = 64 samples
             {
-                usleep(1000);								        // 1ms wait
-                Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow);				// read the FIFO Depth register
+                usleep(1000);						        // 1ms wait
+                Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow);	// read the FIFO Depth register
             }
 
             DMAReadFromFPGA(DMAReadfile_fd, MicBasePtr, VDMATRANSFERSIZE, VADDRMICSTREAMREAD);
-
-            // create the packet into UDPBuffer
-            *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
             memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
-            Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
-            if(Error == -1)
+
+            if(1)//TXActive != 2)
             {
-                perror("sendmsg, Mic Audio");
-                InitError=true;
-            }
-            if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
-	    {
-              *(uint32_t*)UDPBuffer = htonl(SequenceCounter2++);        // add sequence count
-              memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // create local copy of PC destination address
+              // create the packet into UDPBuffer
+              *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
+              memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));
               Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
               if(Error == -1)
               {
-                  perror("sendmsg 2nd client, Mic Audio");
+                  perror("sendmsg, Mic Audio");
                   InitError=true;
+              }
+            }
+
+            if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
+            {
+              if(1)//TXActive != 1)
+              {
+                *(uint32_t*)UDPBuffer = htonl(SequenceCounter2++);        // add sequence count
+                memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));
+                Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+                if(Error == -1)
+                {
+                    perror("sendmsg 2nd client, Mic Audio");
+                    InitError=true;
+                }
               }
 	    }
 	    else
               SequenceCounter2 = 0;
-            memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // create local copy of PC destination address
         }
     }
 //
