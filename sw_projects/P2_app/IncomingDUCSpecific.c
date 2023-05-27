@@ -47,7 +47,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
     uint8_t SidetoneVolume;
     uint8_t CWRFDelay;
     uint16_t CWHangDelay;
-    int DDCupper;
+    int DDCClient2;
 
     extern uint32_t SDRIP, SDRIP2;
 
@@ -79,8 +79,8 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
 	  if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
             continue; // stray msg from inactive client
 
-          DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
-          if (DDCupper)
+          DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+          if (DDCClient2)
           {
             NewMessageReceived2 = true;
             if(TXActive == 1) continue;

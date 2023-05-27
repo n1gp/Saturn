@@ -52,7 +52,7 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
     struct iovec iovecinst;                               // iovcnt buffer - 1 for each outgoing buffer
     struct msghdr datagram;                               // multiple incoming message header
     int size;                                             // UDP datagram length
-    int DDCupper;
+    int DDCClient2;
 
     extern int SDRIP, SDRIP2;
 //
@@ -122,8 +122,8 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
             if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
               continue; // stray msg from inactive client
 
-            DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
-            if (DDCupper)
+            DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+            if (DDCClient2)
             {
               NewMessageReceived2 = true;
 	      continue;		// skip for 2nd client

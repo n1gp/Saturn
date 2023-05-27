@@ -45,7 +45,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   uint32_t LongWord;
   uint16_t Word;
   int i;                                                // counter
-  int DDCupper;
+  int DDCClient2;
 
   extern int TXActive;
   extern uint32_t SDRIP, SDRIP2;
@@ -79,27 +79,27 @@ void *IncomingHighPriority(void *arg)                   // listener thread
     //
     if(size == VHIGHPRIOTIYTOSDRSIZE)
     {
-      //printf("high priority packet received, DDCupper:%d TXActive:%d\n", DDCupper, TXActive);
+      //printf("high priority packet received, DDCClient2:%d TXActive:%d\n", DDCClient2, TXActive);
       if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
         continue; // stray msg from inactive client
 
-      DDCupper = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+      DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
 //
 // now properly decode DDC frequencies
 //
-      int lower = (DDCupper)?4:0;
-      int upper = (DDCupper)?VNUMDDC:4;
-      for(i=lower; i<upper; i++)
+      int limit = (DDCClient2)?6:4;
+      int offset = (DDCClient2)?0:6;
+      for(i=0; i<limit; i++)
       {
-        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+(i-lower)*4+9));
-        SetDDCFrequency(i, LongWord, true);                   // temporarily set above
+        LongWord = ntohl(*(uint32_t *)(UDPInBuffer+i*4+9));
+        SetDDCFrequency(i+offset, LongWord, true);                   // temporarily set above
       }
 
       Byte = (uint8_t)(UDPInBuffer[4]);
       RunBit = (bool)(Byte&1);
       IsTXMode = (bool)(Byte&2);
 
-      if (DDCupper)
+      if (DDCClient2)
       {
         NewMessageReceived2 = true;
         if(TXActive == 1) continue;
