@@ -53,7 +53,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
     struct iovec iovecinst;                               // iovcnt buffer - 1 for each outgoing buffer
     struct msghdr datagram;                               // multiple incoming message header
     int size;                                             // UDP datagram length
-    int DDCClient2;
+    int Client2;
 
     extern uint32_t SDRIP, SDRIP2;
 
@@ -131,12 +131,12 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
         }
         if(size == VDUCIQSIZE)
         {
-            //printf("DUC I/Q packet received, DDCClient2:%d TXActive:%d\n", DDCClient2, TXActive);
+            //printf("DUC I/Q packet received, Client2:%d TXActive:%d\n", Client2, TXActive);
             if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
               continue; // stray msg from inactive client
 
-            DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
-            if (DDCClient2)
+            Client2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+            if (Client2)
             {
               NewMessageReceived2 = true;
               if(TXActive == 1) continue;

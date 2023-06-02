@@ -346,7 +346,7 @@ int main(int argc, char *argv[])
     0,0,0,0,                                      // sequence bytes
     2,                                            // 2 if not active; 3 if active
     0,0,0,0,0,0,                                  // SDR (raspberry i) MAC address
-    10,                                           // board type. changed from "orion mk2" to "saturn"
+    5,                                            // board type. changed from "hermes" to "orion mk2"
     38,                                           // protocol version 3.8
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
@@ -368,7 +368,6 @@ int main(int argc, char *argv[])
 
   uint32_t TestFrequency;                                           // test source DDS freq
   int CmdOption;                                                    // command line option
-  char BuildDate[]=GIT_DATE;
 
   //
   // initialise register access semaphores
@@ -385,7 +384,6 @@ int main(int argc, char *argv[])
 
   OpenXDMADriver();
   PrintVersionInfo();
-  printf("p2app client app software Version:%d Build Date:%s\n", 11, BuildDate);
   PrintAuxADCInfo();
   if (IsFallbackConfig())
       printf("FPGA load is a fallback - you should re-flash the primary FPGA image!\n");
@@ -655,7 +653,7 @@ int main(int argc, char *argv[])
         // general packet. Get the port numbers and establish listener threads
         //
         case 0:
-          printf("P2 General packet to SDR, size= %d\n", size);
+          //printf("P2 General packet to SDR, size= %d\n", size);
           CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
           if(SDRIP == CurrentSDRIP)
 	    NewMessageReceived = true;
@@ -679,19 +677,18 @@ int main(int argc, char *argv[])
             if(ReplyAddressSet && StartBitReceived)
               SDRActive = true;                                       // only set active if we have start bit too
           }
-	  else if(!ReplyAddressSet2 && ReplyAddressSet)
+	  else if(!ReplyAddressSet2)
           {
-            memset(&reply_addr2, 0, sizeof(reply_addr2));
-            reply_addr2.sin_family = AF_INET;
-            reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
-            reply_addr2.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
-            if(SDRIP != *(uint32_t *)&reply_addr2.sin_addr.s_addr)
+            if(SDRActive && SDRIP != CurrentSDRIP)
             {
+              memset(&reply_addr2, 0, sizeof(reply_addr2));
+              reply_addr2.sin_family = AF_INET;
+              reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
+              reply_addr2.sin_port = addr_from.sin_port;
               SDRIP2 = *(uint32_t *)&reply_addr2.sin_addr.s_addr;
               ReplyAddressSet2 = true;
+              SDRActive2 = true;
             }
-            if(ReplyAddressSet2 && SDRActive)
-              SDRActive2 = true;                                       // only set active if we have start bit too
           }
           break;
 
@@ -704,7 +701,7 @@ int main(int argc, char *argv[])
           if(SDRActive && SDRActive2)
             DiscoveryReply[4] = 3;                             // response 2 if not active, 3 if running
           else
-            DiscoveryReply[4] = 2;                             // response 2 if not active, 3 if running
+            DiscoveryReply[4] = 2;
 
           if (SDRActive && CurrentSDRIP == SDRIP)
           {

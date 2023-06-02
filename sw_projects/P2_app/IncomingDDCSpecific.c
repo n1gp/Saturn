@@ -47,7 +47,7 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
   uint16_t Word, Word2;                                 // 16 bit read value
   int i;                                                // counter
   EADCSelect ADC = eADC1;                               // ADC to use for a DDC
-  int DDCClient2;
+  int Client2;
 
   extern uint32_t SDRIP, SDRIP2;
 
@@ -75,12 +75,12 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
     }
     if(size == VDDCSPECIFICSIZE)
     {
-      printf("DDC specific packet received\n");
+      //printf("DDC specific packet received\n");
       if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
          continue; // stray msg from inactive client
 
-      DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
-      if (DDCClient2)
+      Client2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+      if (Client2)
         NewMessageReceived2 = true;
       else
       {
@@ -107,8 +107,8 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
       // be aware an interleaved "odd" DDC will usually be set to disabled, and we need to revert this!
       //
       Word = *(uint16_t*)(UDPInBuffer + 7);                 // get DDC enables 15:0 (note it is already low byte 1st!)
-      int limit = (DDCClient2)?6:4;
-      int offset = (DDCClient2)?0:6;
+      int limit = (Client2)?6:4;
+      int offset = (Client2)?0:6;
       for(i=0; i<limit; i++)
       {
         Enabled = (bool)(Word & 1);                        // get enable state

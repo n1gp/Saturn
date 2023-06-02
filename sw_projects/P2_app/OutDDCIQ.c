@@ -410,6 +410,7 @@ void *OutgoingDDCIQ(void *arg)
 
                     int Error;
                     int DDCfake = (DDC>5)?DDC-6:DDC; // use lower ports for all DDCs since thats what the clients expect
+                    DestAddr[DDC].sin_zero[0] = '2';
                     Error = sendmsg((ThreadData+DDCfake)->Socketid, &datagram[DDC], 0);
 
                     if (Error == -1)

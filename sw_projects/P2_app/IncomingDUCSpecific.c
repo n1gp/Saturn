@@ -47,7 +47,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
     uint8_t SidetoneVolume;
     uint8_t CWRFDelay;
     uint16_t CWHangDelay;
-    int DDCClient2;
+    int Client2;
 
     extern uint32_t SDRIP, SDRIP2;
 
@@ -75,12 +75,12 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
       }
       if(size == VDUCSPECIFICSIZE)
       {
-          printf("DUC specific packet received\n");
+          //printf("DUC specific packet received\n");
 	  if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
             continue; // stray msg from inactive client
 
-          DDCClient2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
-          if (DDCClient2)
+          Client2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+          if (Client2)
           {
             NewMessageReceived2 = true;
             if(TXActive == 1) continue;
