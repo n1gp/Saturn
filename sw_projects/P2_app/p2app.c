@@ -346,7 +346,7 @@ int main(int argc, char *argv[])
     0,0,0,0,                                      // sequence bytes
     2,                                            // 2 if not active; 3 if active
     0,0,0,0,0,0,                                  // SDR (raspberry i) MAC address
-    5,                                            // board type. changed from "hermes" to "orion mk2"
+    10,                                           // board type. changed from "orion mk2" to "saturn"
     38,                                           // protocol version 3.8
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
@@ -368,6 +368,7 @@ int main(int argc, char *argv[])
 
   uint32_t TestFrequency;                                           // test source DDS freq
   int CmdOption;                                                    // command line option
+  char BuildDate[]=GIT_DATE;
 
   //
   // initialise register access semaphores
@@ -384,6 +385,7 @@ int main(int argc, char *argv[])
 
   OpenXDMADriver();
   PrintVersionInfo();
+  printf("p2app client app software Version:%d Build Date:%s\n", 11, BuildDate);
   PrintAuxADCInfo();
   if (IsFallbackConfig())
       printf("FPGA load is a fallback - you should re-flash the primary FPGA image!\n");
