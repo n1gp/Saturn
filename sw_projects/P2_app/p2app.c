@@ -53,6 +53,7 @@
 #include "OutDDCIQ.h"
 #include "OutHighPriority.h"
 
+#define P2APPVERSION 12
 
 extern sem_t DDCInSelMutex;                 // protect access to shared DDC input select register
 extern sem_t DDCResetFIFOMutex;             // protect access to FIFO reset register
@@ -276,6 +277,8 @@ void* CheckForActivity(void *arg)
     if (!NewMessageReceived)                // if no messages received,
     {
       SDRActive = false;                    // set back to inactive
+      SetTXEnable(false);
+      EnableCW(false, false);
       ReplyAddressSet = false;
       StartBitReceived = false;
       if(PreviouslyActiveState) {
@@ -323,6 +326,7 @@ void Shutdown()
   sem_destroy(&CodecRegMutex);
   SetMOX(false);
   SetTXEnable(false);
+  EnableCW(false, false);
 }
 
 
@@ -385,7 +389,7 @@ int main(int argc, char *argv[])
 
   OpenXDMADriver();
   PrintVersionInfo();
-  printf("p2app client app software Version:%d Build Date:%s\n", 11, BuildDate);
+  printf("p2app client app software Version:%d Build Date:%s\n", P2APPVERSION, BuildDate);
   PrintAuxADCInfo();
   if (IsFallbackConfig())
       printf("FPGA load is a fallback - you should re-flash the primary FPGA image!\n");
@@ -400,7 +404,7 @@ int main(int argc, char *argv[])
   SetByteSwapping(true);                                            // h/w to generate network byte order
   SetSpkrMute(false);
   SetTXAmplitudeScaling(VCONSTTXAMPLSCALEFACTOR);
-  SetTXEnable(true);
+  // SetTXEnable(true);                                             // now only enabled if SDR active
   EnableAlexManualFilterSelect(true);
   SetBalancedMicInput(false);
 
@@ -677,7 +681,10 @@ int main(int argc, char *argv[])
             HandleGeneralPacket(UDPInBuffer);
             ReplyAddressSet = true;
             if(ReplyAddressSet && StartBitReceived)
+	    {
               SDRActive = true;                                       // only set active if we have start bit too
+              SetTXEnable(true);
+	    }
           }
 	  else if(!ReplyAddressSet2)
           {

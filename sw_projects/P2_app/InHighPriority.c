@@ -112,11 +112,16 @@ void *IncomingHighPriority(void *arg)                   // listener thread
         {
           StartBitReceived = true;
           if(ReplyAddressSet && StartBitReceived)
+          {
             SDRActive = true;                                       // only set active if we have replay address too
+            SetTXEnable(true);
+          }
         }
         else
         {
           SDRActive = false;                                       // set state of whole app
+          SetTXEnable(false);
+          EnableCW(false, false);
           //SDRIP = 0;
           printf("set to inactive by client app\n");
           StartBitReceived = false;
@@ -155,11 +160,12 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       AlexManualRXFilters(Word, 0);
       //
       // RX atten during TX and RX
+      // this should be just on RX now, because TX settings are in the DUC specific packet bytes 58&59
       //
       Byte2 = (uint8_t)(UDPInBuffer[1442]);     // RX2 atten
       Byte = (uint8_t)(UDPInBuffer[1443]);      // RX1 atten
-      SetADCAttenuator(eADC1, Byte, true, true);
-      SetADCAttenuator(eADC2, Byte2, true, true);
+      SetADCAttenuator(eADC1, Byte, true, false);
+      SetADCAttenuator(eADC2, Byte2, true, false);
       //
       // CWX bits
       //
