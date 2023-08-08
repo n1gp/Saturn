@@ -134,7 +134,7 @@ void *OutgoingMicSamples(void *arg)
                 MakeSocket(ThreadData, 0);                        // this binds to the new port.
                 ThreadData->Cmdid &= ~VBITCHANGEPORT;             // clear command bit
             }
-            usleep(100);
+            usleep(10000);
         }
     //
     // if we get here, run has been initiated

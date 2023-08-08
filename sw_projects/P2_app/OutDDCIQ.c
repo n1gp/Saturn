@@ -355,7 +355,7 @@ void *OutgoingDDCIQ(void *arg)
                     MakeSocket((ThreadData + DDC), 0);                        // this binds to the new port.
                     (ThreadData + DDC) -> Cmdid &= ~VBITCHANGEPORT;           // clear command bit
                 }
-            usleep(100);
+            usleep(10000);
         }
         printf("starting outgoing DDC data\n");
         //
