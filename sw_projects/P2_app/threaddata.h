@@ -80,7 +80,7 @@ extern bool NewMessageReceived;                     // set whenever a message is
 extern bool NewMessageReceived2;                    // set whenever a message is received
 extern bool ThreadError;                            // set true if a thread reports an error
 extern int TXActive;                                // The client actively transmitting, 0-none, 1-SDRIP, 2-SDRIP2
-
+extern bool UseDebug;                               // true if debugging enabled
 
 #define VBITCHANGEPORT 1                        // if set, thread must close its socket and open a new one on different port
 #define VBITINTERLEAVE 2                        // if set, DDC threads should interleave data
