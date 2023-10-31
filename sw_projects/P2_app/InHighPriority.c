@@ -104,6 +104,8 @@ void *IncomingHighPriority(void *arg)                   // listener thread
         NewMessageReceived2 = true;
         if(TXActive == 1) continue;
         TXActive = (IsTXMode)?2:0;
+        // just return for now until TX issues are resolved
+        return;
       }
       else
       {
