@@ -102,10 +102,12 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       if (Client2)
       {
         NewMessageReceived2 = true;
+
+        // just continue for now until TX issues are resolved
+        continue;
+
         if(TXActive == 1) continue;
         TXActive = (IsTXMode)?2:0;
-        // just return for now until TX issues are resolved
-        return;
       }
       else
       {

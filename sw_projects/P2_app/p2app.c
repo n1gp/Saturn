@@ -284,7 +284,7 @@ void* CheckForActivity(void *arg)
       StartBitReceived = false;
       if(PreviouslyActiveState) {
         SDRIP = 0;
-        for(i=6; i<VNUMDDC; i++)            // disable client1 bank of DDCs
+        for(i=6; i<VNUMDDC; i++)                // disable client1 bank of DDCs
           SetP2SampleRate(i, false, 48, false);
         WriteP2DDCRateRegister();
         printf("Reverted to Inactive State for 1st client after no activity\n");
@@ -293,14 +293,14 @@ void* CheckForActivity(void *arg)
     NewMessageReceived = false;
 
     PreviouslyActiveState2 = SDRActive2;
-    if (!NewMessageReceived2)                // if no messages received,
+    if (!NewMessageReceived2 && HW_Timer_Enable2) // if no messages received,
     {
-      SDRActive2 = false;                    // set back to inactive
+      SDRActive2 = false;                        // set back to inactive
       ReplyAddressSet2 = false;
       StartBitReceived = false;
       if(PreviouslyActiveState2) {
         SDRIP2 = 0;
-        for(i=0; i<6; i++)               // disable client2 bank of DDCs
+        for(i=0; i<6; i++)                       // disable client2 bank of DDCs
           SetP2SampleRate(i, false, 48, false);
         WriteP2DDCRateRegister();
         printf("Reverted to Inactive State for 2nd client after no activity\n");
@@ -699,6 +699,7 @@ int main(int argc, char *argv[])
               reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
               reply_addr2.sin_port = addr_from.sin_port;
               SDRIP2 = *(uint32_t *)&reply_addr2.sin_addr.s_addr;
+              HandleGeneralPacket(UDPInBuffer);
               ReplyAddressSet2 = true;
               SDRActive2 = true;
             }

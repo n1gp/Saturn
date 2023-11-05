@@ -22,6 +22,7 @@
 #include "../common/saturntypes.h"
 
 extern bool HW_Timer_Enable;
+extern bool HW_Timer_Enable2;
 
 //
 // protocol 2 handler for General Packet to SDR

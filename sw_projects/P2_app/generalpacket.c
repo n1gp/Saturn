@@ -17,11 +17,13 @@
 #include "threaddata.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include "generalpacket.h"
 #include "../common/saturnregisters.h"
 
 
 bool HW_Timer_Enable = true;
+bool HW_Timer_Enable2 = true;
 
 //
 // protocol 2 handler for General Packet to SDR
@@ -34,6 +36,18 @@ int HandleGeneralPacket(uint8_t *PacketBuffer)
   uint16_t Port;                                  // port number from table
   int i;
   uint8_t Byte;
+  int Client2;
+
+  extern uint32_t SDRIP2;
+
+  Client2 = (*(uint32_t *)&reply_addr2.sin_addr.s_addr == SDRIP2);
+  if (Client2)
+  {
+    NewMessageReceived2 = true;
+    Byte = *(uint8_t*)(PacketBuffer+38);                // enable timeout
+    HW_Timer_Enable2 = ((bool)(Byte&1));
+    return 0;
+  }
 
   SetPort(VPORTDDCSPECIFIC, ntohs(*(uint16_t*)(PacketBuffer+5)));
   SetPort(VPORTDUCSPECIFIC, ntohs(*(uint16_t*)(PacketBuffer+7)));
