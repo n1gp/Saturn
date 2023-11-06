@@ -130,7 +130,7 @@ void *OutgoingMicSamples(void *arg)
   //
     while (!InitError)
     {
-        while(!(SDRActive))
+        while(!SDRActive)
         {
             if(ThreadData->Cmdid & VBITCHANGEPORT)
             {
@@ -159,7 +159,7 @@ void *OutgoingMicSamples(void *arg)
         datagram.msg_name = &DestAddr;                              // MAC addr & port to send to
         datagram.msg_namelen = sizeof(DestAddr);
 
-        while(SDRActive && !InitError)                              // main loop
+        while((SDRActive || SDRActive2) && !InitError)                              // main loop
         {
             //
             // now wait until there is data, then DMA it

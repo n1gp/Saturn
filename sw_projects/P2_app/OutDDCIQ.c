@@ -399,7 +399,7 @@ void *OutgoingDDCIQ(void *arg)
 
                 while ((IQHeadPtr[DDC] - IQReadPtr[DDC]) > VIQBYTESPERFRAME)
                 {
-//                    printf("enough data for packet: DDC= %d\n", DDC);
+                    //printf("enough data for packet: DDC=%d\n", DDC);
                     *(uint32_t*)UDPBuffer[DDC] = htonl(SequenceCounter[DDC]++);     // add sequence count
                     memset(UDPBuffer[DDC] + 4, 0, 8);                               // clear the timestamp data
                     *(uint16_t*)(UDPBuffer[DDC] + 12) = htons(24);                  // bits per sample
@@ -414,14 +414,17 @@ void *OutgoingDDCIQ(void *arg)
                     memcpy(&DestAddr[DDC], (DDC>5)?&reply_addr:&reply_addr2, sizeof(struct sockaddr_in));
 
                     int Error;
-                    int DDCfake = (DDC>5)?DDC-6:DDC; // use lower ports for all DDCs since thats what the clients expect
-                    Error = sendmsg((ThreadData+DDCfake)->Socketid, &datagram[DDC], 0);
+                    if (SDRActive && DDC>5)
+                      Error = sendmsg((ThreadData+(DDC-6))->Socketid, &datagram[DDC], 0);
+                    else if (SDRActive2)
+                      Error = sendmsg((ThreadData+DDC)->Socketid, &datagram[DDC], 0);
+
                     if(StartupCount != 0)                                   // decrement startup message count
                         StartupCount--;
 
                     if (Error == -1)
                     {
-                        printf("Send Error, DDC=%d, errno=%d, socket id = %d\n", DDC, errno, (ThreadData+DDCfake)->Socketid);
+                        printf("Send Error, DDC=%d, errno=%d, socket id=%d\n", DDC, errno, (ThreadData+((DDC>5)?DDC-6:DDC))->Socketid);
                         InitError = true;
                     }
                 }

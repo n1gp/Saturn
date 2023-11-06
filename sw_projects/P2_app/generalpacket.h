@@ -30,7 +30,7 @@ extern bool HW_Timer_Enable2;
 // copy port numbers to port table, 
 // then create listener threads for incoming packets & senders foroutgoing
 //
-int HandleGeneralPacket(uint8_t *PacketBuffer);
+int HandleGeneralPacket(uint8_t *PacketBuffer, int client);
 
 
 

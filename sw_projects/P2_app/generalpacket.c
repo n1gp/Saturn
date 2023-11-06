@@ -31,17 +31,13 @@ bool HW_Timer_Enable2 = true;
 // copy port numbers to port table, 
 // then create listener threads for incoming packets & senders foroutgoing
 //
-int HandleGeneralPacket(uint8_t *PacketBuffer)
+int HandleGeneralPacket(uint8_t *PacketBuffer, int client)
 {
   uint16_t Port;                                  // port number from table
   int i;
   uint8_t Byte;
-  int Client2;
 
-  extern uint32_t SDRIP2;
-
-  Client2 = (*(uint32_t *)&reply_addr2.sin_addr.s_addr == SDRIP2);
-  if (Client2)
+  if (client == 2)
   {
     NewMessageReceived2 = true;
     Byte = *(uint8_t*)(PacketBuffer+38);                // enable timeout

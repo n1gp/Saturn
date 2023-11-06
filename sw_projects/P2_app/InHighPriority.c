@@ -40,7 +40,6 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   struct msghdr datagram;                               // multiple incoming message header
   int size;                                             // UDP datagram length
   bool RunBit;                                          // true if "run" bit set
-  uint32_t DDCPhaseIncrement;                           // delta phase for a DDC
   uint8_t Byte, Byte2;                                  // received dat being decoded
   uint32_t LongWord;
   uint16_t Word;
@@ -102,6 +101,26 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       if (Client2)
       {
         NewMessageReceived2 = true;
+        if(RunBit)
+        {
+          StartBitReceived2 = true;
+          if(ReplyAddressSet2 && StartBitReceived2)
+          {
+            SDRActive2 = true;                                       // only set active if we have replay address too
+          }
+        }
+        else
+        {
+          SDRActive2 = false;                                       // set state of whole app
+          StartBitReceived2 = false;
+          ReplyAddressSet2 = false;
+          SDRIP2 = 0;
+          for(i=0; i<6; i++)                // disable client1 bank of DDCs
+            SetP2SampleRate(i, false, 48, false);
+          WriteP2DDCRateRegister();
+          //printf("set to inactive by client2 app\n");
+          printf("set to inactive by client2 app\n");
+        }
 
         // just continue for now until TX issues are resolved
         continue;
@@ -126,15 +145,17 @@ void *IncomingHighPriority(void *arg)                   // listener thread
           SDRActive = false;                                       // set state of whole app
           SetTXEnable(false);
           EnableCW(false, false);
+          StartBitReceived = false;
+          ReplyAddressSet = false;
+          for(i=6; i<VNUMDDC; i++)                // disable client1 bank of DDCs
+            SetP2SampleRate(i, false, 48, false);
+          WriteP2DDCRateRegister();
           //SDRIP = 0;
           printf("set to inactive by client app\n");
-          StartBitReceived = false;
         }
         if(TXActive == 2) continue;
         TXActive = (IsTXMode)?1:0;
       }
-
-      SetMOX(IsTXMode);
 
       //
       // DUC frequency & drive level
@@ -170,6 +191,9 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       Byte = (uint8_t)(UDPInBuffer[1443]);      // RX1 atten
       SetADCAttenuator(eADC1, Byte, true, false);
       SetADCAttenuator(eADC2, Byte2, true, false);
+
+      SetMOX(IsTXMode);
+
       //
       // CWX bits
       //

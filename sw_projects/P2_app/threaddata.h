@@ -76,6 +76,7 @@ extern bool SDRActive2;
 extern bool ReplyAddressSet;                        // true when reply address has been set
 extern bool ReplyAddressSet2;
 extern bool StartBitReceived;                       // true when "run" bit has been set
+extern bool StartBitReceived2;
 extern bool NewMessageReceived;                     // set whenever a message is received
 extern bool NewMessageReceived2;                    // set whenever a message is received
 extern bool ThreadError;                            // set true if a thread reports an error

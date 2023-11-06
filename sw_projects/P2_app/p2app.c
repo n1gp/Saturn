@@ -69,6 +69,7 @@ bool SDRActive2;
 bool ReplyAddressSet = false;               // true when reply address has been set
 bool ReplyAddressSet2 = false;
 bool StartBitReceived = false;              // true when "run" bit has been set
+bool StartBitReceived2 = false;
 bool NewMessageReceived = false;            // set whenever a message is received
 bool NewMessageReceived2 = false;
 bool ExitRequested = false;                 // true if "exit checking" thread requests shutdown
@@ -297,7 +298,7 @@ void* CheckForActivity(void *arg)
     {
       SDRActive2 = false;                        // set back to inactive
       ReplyAddressSet2 = false;
-      StartBitReceived = false;
+      StartBitReceived2 = false;
       if(PreviouslyActiveState2) {
         SDRIP2 = 0;
         for(i=0; i<6; i++)                       // disable client2 bank of DDCs
@@ -663,8 +664,8 @@ int main(int argc, char *argv[])
         // general packet. Get the port numbers and establish listener threads
         //
         case 0:
-          //printf("P2 General packet to SDR, size= %d\n", size);
           CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
+          //printf("P2 General packet to SDR, size=%d CurrentSDRIP=%d A1:%d A2:%d\n", size, CurrentSDRIP, SDRActive, SDRActive2);
           if(SDRIP == CurrentSDRIP)
 	    NewMessageReceived = true;
           else if(SDRIP2 == CurrentSDRIP)
@@ -673,16 +674,14 @@ int main(int argc, char *argv[])
           //
           // get "from" MAC address and port; this is where the data goes back to
           //
-          if(!ReplyAddressSet)
+          if(!ReplyAddressSet && SDRIP2 != CurrentSDRIP)
           {
-            if(SDRActive2 && SDRIP2 == CurrentSDRIP)
-              break; // mismatch, ignore
             memset(&reply_addr, 0, sizeof(reply_addr));
             reply_addr.sin_family = AF_INET;
             reply_addr.sin_addr.s_addr = addr_from.sin_addr.s_addr;
             reply_addr.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
             SDRIP = *(uint32_t *)&reply_addr.sin_addr.s_addr;
-            HandleGeneralPacket(UDPInBuffer);
+            HandleGeneralPacket(UDPInBuffer, 1);
             ReplyAddressSet = true;
             if(ReplyAddressSet && StartBitReceived)
 	    {
@@ -690,19 +689,16 @@ int main(int argc, char *argv[])
               SetTXEnable(true);
 	    }
           }
-	  else if(!ReplyAddressSet2)
+          else if(!ReplyAddressSet2 && SDRIP != CurrentSDRIP)
           {
-            if(SDRActive && SDRIP != CurrentSDRIP)
-            {
               memset(&reply_addr2, 0, sizeof(reply_addr2));
               reply_addr2.sin_family = AF_INET;
               reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
               reply_addr2.sin_port = addr_from.sin_port;
               SDRIP2 = *(uint32_t *)&reply_addr2.sin_addr.s_addr;
-              HandleGeneralPacket(UDPInBuffer);
+              HandleGeneralPacket(UDPInBuffer, 2);
               ReplyAddressSet2 = true;
               SDRActive2 = true;
-            }
           }
           break;
 
@@ -752,7 +748,3 @@ int main(int argc, char *argv[])
   Shutdown();
   return EXIT_SUCCESS;
 }
-
-
-
-

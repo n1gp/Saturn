@@ -103,7 +103,7 @@ void *OutgoingHighPriority(void *arg)
     // when a DDC becomes enabled, its paired DDC may not know yet and may still be set to interleaved.
     // when a DDC is set to interleaved, the paired DDC may not have been disabled yet.
     //
-    while(SDRActive && !InitError)                               // main loop
+    while((SDRActive || SDRActive2) && !InitError)              // main loop
     {
       uint8_t SleepCount;                                       // counter for sending next message
       uint8_t PTTBits;                                          // PTT bits - and change means a new message needed
