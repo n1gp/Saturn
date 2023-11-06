@@ -665,7 +665,7 @@ int main(int argc, char *argv[])
         //
         case 0:
           CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
-          //printf("P2 General packet to SDR, size=%d CurrentSDRIP=%d A1:%d A2:%d\n", size, CurrentSDRIP, SDRActive, SDRActive2);
+          //printf("P2 General packet to SDR, size=%d CurrentSDRIP=%d S1:%d S2:%d\n", size, CurrentSDRIP, SDRIP, SDRIP2);
           if(SDRIP == CurrentSDRIP)
 	    NewMessageReceived = true;
           else if(SDRIP2 == CurrentSDRIP)
@@ -674,32 +674,42 @@ int main(int argc, char *argv[])
           //
           // get "from" MAC address and port; this is where the data goes back to
           //
-          if(!ReplyAddressSet && SDRIP2 != CurrentSDRIP)
+          if(SDRIP == 0 && SDRIP2 != CurrentSDRIP)
           {
-            memset(&reply_addr, 0, sizeof(reply_addr));
-            reply_addr.sin_family = AF_INET;
-            reply_addr.sin_addr.s_addr = addr_from.sin_addr.s_addr;
-            reply_addr.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
-            SDRIP = *(uint32_t *)&reply_addr.sin_addr.s_addr;
-            HandleGeneralPacket(UDPInBuffer, 1);
-            ReplyAddressSet = true;
-            if(ReplyAddressSet && StartBitReceived)
-	    {
-              SDRActive = true;                                       // only set active if we have start bit too
-              SetTXEnable(true);
-	    }
+            if(!ReplyAddressSet)
+            {
+              memset(&reply_addr, 0, sizeof(reply_addr));
+              reply_addr.sin_family = AF_INET;
+              reply_addr.sin_addr.s_addr = addr_from.sin_addr.s_addr;
+              reply_addr.sin_port = addr_from.sin_port;                       // (but each outgoing thread needs to set its own sin_port)
+              SDRIP = *(uint32_t *)&reply_addr.sin_addr.s_addr;
+              ReplyAddressSet = true;
+              if(ReplyAddressSet && StartBitReceived)
+              {
+                SDRActive = true;                                       // only set active if we have start bit too
+                SetTXEnable(true);
+              }
+            }
           }
-          else if(!ReplyAddressSet2 && SDRIP != CurrentSDRIP)
+          else if(SDRIP2 == 0 && SDRIP != CurrentSDRIP)
           {
+	    if(!ReplyAddressSet2)
+            {
               memset(&reply_addr2, 0, sizeof(reply_addr2));
               reply_addr2.sin_family = AF_INET;
               reply_addr2.sin_addr.s_addr = addr_from.sin_addr.s_addr;
               reply_addr2.sin_port = addr_from.sin_port;
               SDRIP2 = *(uint32_t *)&reply_addr2.sin_addr.s_addr;
-              HandleGeneralPacket(UDPInBuffer, 2);
               ReplyAddressSet2 = true;
               SDRActive2 = true;
+	    }
           }
+
+          if(SDRIP == CurrentSDRIP)
+            HandleGeneralPacket(UDPInBuffer, 1);
+	  else if(SDRIP2 == CurrentSDRIP)
+            HandleGeneralPacket(UDPInBuffer, 2);
+
           break;
 
         //

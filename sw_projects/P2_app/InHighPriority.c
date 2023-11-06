@@ -114,11 +114,10 @@ void *IncomingHighPriority(void *arg)                   // listener thread
           SDRActive2 = false;                                       // set state of whole app
           StartBitReceived2 = false;
           ReplyAddressSet2 = false;
-          SDRIP2 = 0;
           for(i=0; i<6; i++)                // disable client1 bank of DDCs
             SetP2SampleRate(i, false, 48, false);
           WriteP2DDCRateRegister();
-          //printf("set to inactive by client2 app\n");
+          SDRIP2 = 0;
           printf("set to inactive by client2 app\n");
         }
 
@@ -150,7 +149,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
           for(i=6; i<VNUMDDC; i++)                // disable client1 bank of DDCs
             SetP2SampleRate(i, false, 48, false);
           WriteP2DDCRateRegister();
-          //SDRIP = 0;
+          SDRIP = 0;
           printf("set to inactive by client app\n");
         }
         if(TXActive == 2) continue;

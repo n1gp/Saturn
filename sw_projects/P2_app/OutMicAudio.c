@@ -182,21 +182,26 @@ void *OutgoingMicSamples(void *arg)
             }
             DMAReadFromFPGA(DMAReadfile_fd, MicBasePtr, VDMATRANSFERSIZE, VADDRMICSTREAMREAD);
 
-            // create the packet into UDPBuffer
-            *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
-            if(TXActive == 2)
-              memset(UDPBuffer+4, 0, VDMATRANSFERSIZE);       // copy in mic samples
-            else
-              memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
-            memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));
-            Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
-            if(StartupCount != 0)                                   // decrement startup message count
-                StartupCount--;
-            if(Error == -1)
+            if(SDRActive) // some programs stop communicating if this msg isn't sent (SparkSDR)
             {
-                perror("sendmsg, Mic Audio");
-                InitError=true;
+              // create the packet into UDPBuffer
+              *(uint32_t*)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
+              if(TXActive == 2)
+                memset(UDPBuffer+4, 0, VDMATRANSFERSIZE);       // copy in mic samples
+              else
+                memcpy(UDPBuffer+4, MicBasePtr, VDMATRANSFERSIZE);       // copy in mic samples
+              memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));
+              Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+              if(StartupCount != 0)                                   // decrement startup message count
+                  StartupCount--;
+              if(Error == -1)
+              {
+                  perror("sendmsg, Mic Audio");
+                  InitError=true;
+              }
             }
+	    else
+              SequenceCounter = 0;
 
             if(SDRActive2) // some programs stop communicating if this msg isn't sent (SparkSDR)
             {

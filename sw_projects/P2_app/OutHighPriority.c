@@ -131,18 +131,23 @@ void *OutgoingHighPriority(void *arg)
       Byte = (uint8_t)GetUserIOBits();                  // user I/O bits
       *(uint8_t *)(UDPBuffer+59) = Byte;
 
-      if(TXActive != 2)
+      if(SDRActive)
       {
-        *(uint32_t *)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
-        Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
-
-        if(Error == -1)
+        if(TXActive != 2)
         {
-          printf("High Priority Send Error, errno=%d\n", errno);
-          printf("socket id = %d\n", ThreadData -> Socketid);
-          InitError=true;
+          *(uint32_t *)UDPBuffer = htonl(SequenceCounter++);        // add sequence count
+          Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+
+          if(Error == -1)
+          {
+            printf("High Priority Send Error, errno=%d\n", errno);
+            printf("socket id = %d\n", ThreadData -> Socketid);
+            InitError=true;
+          }
         }
       }
+      else
+        SequenceCounter = 0;
 
       if(SDRActive2)
       {
