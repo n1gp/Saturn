@@ -52,13 +52,59 @@
 #include "OutMicAudio.h"
 #include "OutDDCIQ.h"
 #include "OutHighPriority.h"
+#include "Outwideband.h"
+#include "cathandler.h"
+#include "LDGATU.h"
+#include "frontpanelhandler.h"
 
-#define P2APPVERSION 13
+#define P2APPVERSION 31
+#define FWREQUIREDMAJORVERSION 1                  // major version that is required. Only altered if programming interface changes. 
+//
+// the Firmware version is a protection to make sure that if a p2app update is required by the new firmware,
+// it won't work with an old version. This means p2app will always need to be updated if the firmware is updated to new major version.
+//
+//------------------------------------------------------------------------------------------
+// VERSION History
+// V31: 21/11/2024:  added CW keyer keydown bit to high priority status byte 4 bit 7 for Thetis generated sidetone
+// V30: 17/11/2024:  wideband record added.
+// V29: 15/10/2024   DL1YCF CW ramp; CW amplitude corrected; added support to detect & check FPGA major version
+// V27: 4/8/2024:    merged G2V2 panel support code into main
+// V26: 17/7/2024:   initial support for G2V2 panel implemented. Polling CAT for LED states.
+// V25: 22/6/2024:   merged branch with beta code for G2 panel controls to communicate via CAT over TCP/IP
+// V24: 17/6/2024:   support for V17 firmware (fixed latency CW ramp sidetone)
+// V23: 07/5/2024:   no functional change. Recognises firmware V16.
+// V22: 06/05/2024:  CW ramp calculated by different C code (same shape). Enabled firmware V15.
+// V21: 02/05/2024:  max CW ramp length extended to 20ms. Needs firmware V14.
+// V20: 29/4/2024:   PA bit from Alex word 1 removed from code: wasn't being set by Thetis and 
+//                   "general packet to SDR" has PA disable bit too
+//
+// V19: 7/4/2024:    PA disable bit supported. Checks for FPGA version: won't run with incompatible version
+//
+// V18: 1/4/2024:    matching updates for FW V 13. DUC FIFO =4096 depth; 
+//                   TX scaling factor changed aster DUC firmware adjusted for TX noise improvement 
+//
+// V17: 13/3/2024:   CW ramp period is settable by client application.
+//
+// V16: 6/3/2024:    added interface for LDG ATU via CAT, requesting tune power when needed by ATU
+//                   bare bones interface for G2 front panel
+//                     
+
+// V15: 16/01/2024:  added specific TXant bits from revised protocol 2 high priority message to resolve CW
+//                   TX power generated momentarily into RX antenna if different
+//                   reads CAT over TCP/IP port number
+// V14: 17/12/2023:  added ATU tune request to IO6 bit position; FIFO under and overflow detection;
+//                   changed FIFO sizes; debug can be enabled as runtime setting; enable/disable ext speaker;
+//                   network timeout
+// V13, 18/8/2023:   inverted IO8 sense for piHPSDR-initiated CW
+// V12, 29/7/2023:   CW changes to set RX attenuation on TX from protocol bytes 58, 59;
+//                   CW breakin properly enabled; CW keyer disabled if p2app not active;
+//                   CW changes to minimise delay reporting to prototol 2
 
 extern sem_t DDCInSelMutex;                 // protect access to shared DDC input select register
 extern sem_t DDCResetFIFOMutex;             // protect access to FIFO reset register
 extern sem_t RFGPIOMutex;                   // protect access to RF GPIO register
 extern sem_t CodecRegMutex;                 // protect writes to codec
+sem_t MicWBDMAMutex;                        // protect one DMA read channel shared by mic and WB read
 
 struct sockaddr_in reply_addr;              // destination address for outgoing data
 struct sockaddr_in reply_addr2;
@@ -76,6 +122,8 @@ bool ExitRequested = false;                 // true if "exit checking" thread re
 bool SkipExitCheck = false;                 // true to skip "exit checking", if running as a service
 bool ThreadError = false;                   // true if a thread reports an error
 bool UseDebug = false;                      // true if to enable debugging
+bool UseControlPanel = false;               // true if to use a control panel
+bool UseLDGATU = false;                     // true if to use an LDG ATU via CAT
 
 uint32_t SDRIP = 0;
 uint32_t SDRIP2 = 0;
@@ -87,6 +135,9 @@ uint32_t CurrentSDRIP;
 #define VDISCOVERYREPLYSIZE 60              // reply packet
 #define VWIDEBANDSIZE 1028                  // wideband scalar samples
 #define VCONSTTXAMPLSCALEFACTOR 0x0001FFFF  // 18 bit scale value - set to 1/2 of full scale
+#define VCONSTTXAMPLSCALEFACTOR_13 0x0002000  // 18 bit scale value - set to 1/32 of full scale FWV13+
+#define VCONSTTXAMPLSCALEFACTOR_17 0x0002000  // 18 bit scale value - set to 1/32 of full scale FWV17+
+//#define VCONSTTXAMPLSCALEFACTOR_17 0x0002800  // 18 bit scale value - set to 1/32 of full scale FWV17+
 
 struct ThreadSocketData SocketData[VPORTTABLESIZE] =
 {
@@ -133,8 +184,19 @@ pthread_t DUCIQThread;
 pthread_t DDCIQThread[VNUMDDC];               // array, but not sure how many
 pthread_t MicThread;
 pthread_t HighPriorityFromSDRThread;
+pthread_t WidebandDataThread;
+
 pthread_t CheckForExitThread;                 // thread looks for types "exit" command
 pthread_t CheckForNoActivityThread;           // thread looks for inactvity
+
+
+//
+// function ot get program version
+//
+uint32_t GetP2appVersion(void)
+{
+  return P2APPVERSION;
+}
 
 void sig_handler(int signo)
 {
@@ -321,11 +383,15 @@ void* CheckForActivity(void *arg)
 //
 void Shutdown()
 {
+  ShutdownCATHandler();                                   // close CAT connection socket
+  if(UseControlPanel)
+    ShutdownFrontPanelHandler();
   close(SocketData[0].Socketid);                          // close incoming data socket
   sem_destroy(&DDCInSelMutex);
   sem_destroy(&DDCResetFIFOMutex);
   sem_destroy(&RFGPIOMutex);
   sem_destroy(&CodecRegMutex);
+  sem_destroy(&DDCResetFIFOMutex);                        // for DMA
   SetMOX(false);
   SetTXEnable(false);
   EnableCW(false, false);
@@ -353,7 +419,7 @@ int main(int argc, char *argv[])
     2,                                            // 2 if not active; 3 if active
     0,0,0,0,0,0,                                  // SDR (raspberry i) MAC address
     10,                                           // board type. changed from "orion mk2" to "saturn"
-    39,                                           // protocol version 3.8
+    44,                                           // protocol version 4.3
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
     4,                                            // 4DDC
@@ -375,6 +441,10 @@ int main(int argc, char *argv[])
   uint32_t TestFrequency;                                           // test source DDS freq
   int CmdOption;                                                    // command line option
   char BuildDate[]=GIT_DATE;
+  ESoftwareID ID;
+  unsigned int Version = 0;
+  unsigned int MajorVersion = 0;
+  bool IncompatibleFirmware = false;                                // becomes set if firmware is not compatible with this version
 
   //
   // initialise register access semaphores
@@ -382,7 +452,8 @@ int main(int argc, char *argv[])
   sem_init(&DDCInSelMutex, 0, 1);                                   // for DDC input select register
   sem_init(&DDCResetFIFOMutex, 0, 1);                               // for FIFO reset register
   sem_init(&RFGPIOMutex, 0, 1);                                     // for RF GPIO register
-  sem_init(&CodecRegMutex, 0, 1);                                   // for codec writes
+  sem_init(&CodecRegMutex, 0, 1);                                   // for codec access
+  sem_init(&MicWBDMAMutex, 0, 1);                                   // for mic and WB DMA
 
 //
 // setup Saturn hardware
@@ -398,17 +469,43 @@ int main(int argc, char *argv[])
 
   CodecInitialise();
   InitialiseDACAttenROMs();
-  InitialiseCWKeyerRamp(true, 5000);                                // 5 ms ramp, P2
+//  InitialiseCWKeyerRamp(true, 5000);                                // create initial default 5 ms ramp, P2
+  InitialiseCWKeyerRamp(true, 9000);                                // create initial default 9ms DL1YCF amp, P2
   SetCWSidetoneEnabled(true);
   SetTXProtocol(true);                                              // set to protocol 2
   SetTXModulationSource(eIQData);                                   // disable debug options
   HandlerSetEERMode(false);                                         // no EER
   SetByteSwapping(true);                                            // h/w to generate network byte order
   SetSpkrMute(false);
-  SetTXAmplitudeScaling(VCONSTTXAMPLSCALEFACTOR);
+
+  Version = GetFirmwareVersion(&ID);                                // TX scaling changed at FW V13
+  MajorVersion = GetFirmwareMajorVersion();
+
+  if(Version < 13)
+    SetTXAmplitudeScaling(VCONSTTXAMPLSCALEFACTOR);
+  else if (Version < 17)
+    SetTXAmplitudeScaling(VCONSTTXAMPLSCALEFACTOR_13);
+  else
+    SetTXAmplitudeScaling(VCONSTTXAMPLSCALEFACTOR_17);
+  
+
+
+  if (MajorVersion != FWREQUIREDMAJORVERSION)
+  {
+    printf("\n***************************************************************************\n");
+    printf("***************************************************************************\n");
+    printf("Incompatible Saturn FPGA firmware v%d; major version%d\n",
+             Version,  MajorVersion);
+    printf("This version of p2app requires major version = %d\n, FWREQUIREDMAJORVERSION");
+    printf("You must update your copy of p2app to use that firmware version - see User manual\n");
+    printf("p2app will refuse a connection request until this is resolved!\n");
+    printf("\n\n\n***************************************************************************\n");
+    IncompatibleFirmware = true;
+  }
   // SetTXEnable(true);                                             // now only enabled if SDR active
   EnableAlexManualFilterSelect(true);
   SetBalancedMicInput(false);
+  InitCATHandler();
 
   if (signal(SIGINT, sig_handler) == SIG_ERR)
     printf("\ncan't catch SIGINT\n");
@@ -427,22 +524,38 @@ int main(int argc, char *argv[])
 // option string needs a colon after each option letter that has a parameter after it
 // and it has a leading colon to suppress error messages
 //
-  while((CmdOption = getopt(argc, argv, ":i:f:h:m:sd")) != -1)
+  while((CmdOption = getopt(argc, argv, ":a:i:f:m:sdph")) != -1)
   {
     switch(CmdOption)
     {
       case 'h':
         printf("usage: ./p2app <optional arguments>\n");
         printf("optional arguments:\n");
+        printf("-a LDG        control TUNE for LDG ATU\n");
         printf("-f <frequency in Hz> turns on test source for all DDCs\n");
         printf("-i saturn     board responds as board id = Saturn\n");
         printf("-i orionmk2   board responds as board id = Orion mk 2\n");
         printf("-m xlr        selects balanced XLR microphone input\n");
         printf("-m jack       selects unbalanced 3.5mm microphone input\n");
         printf("-s skip checking for exit keys, run as service\n");
+        printf("-d            print additional debug\n");
+        printf("-p            drive G2 control panel\n");
         return EXIT_SUCCESS;
         break;
 
+      case 'a':
+        if(strcmp(optarg,"LDG") == 0)
+        {
+          printf("TUNE command for LDG ATU via CAT\n");
+          UseLDGATU = true;
+        }
+        else
+        {
+          printf("error parsing ATU type. Command is case sensitive\n");
+          printf("-a LDG    selects LDG ATU\n");
+          return EXIT_SUCCESS;
+        }
+        break;
       case 'i':
         if(strcmp(optarg,"saturn") == 0)
         {
@@ -497,11 +610,28 @@ int main(int argc, char *argv[])
         break;
 
       case 'd':
+        printf ("Enhanced debug enabled\n");                  
         UseDebug = true;
+        break;
+
+      case 'p':
+        printf ("Control panel enabled\n");                  
+        UseControlPanel = true;
     }
   }
   printf("\n");
 
+//
+// startup ATU handler if needed
+//
+  if(UseLDGATU)
+    InitialiseLDGHandler();
+
+//
+// startup G2 front panel handler if needed
+//
+  if(UseControlPanel)
+    InitialiseFrontPanelHandler();
 //
 // start up thread for exit command checking
 //
@@ -512,8 +642,8 @@ int main(int argc, char *argv[])
       perror("pthread_create check for exit");
       return EXIT_FAILURE;
     }
-    pthread_detach(CheckForExitThread);
   }
+  pthread_detach(CheckForExitThread);
 
   //
   // create socket for incoming data on the command port
@@ -618,6 +748,23 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
   pthread_detach(DDCIQThread[0]);
+
+//
+// create outgoing wideband data thread which services bothe wideband0 and wideband1
+// both sockets already exist so copy socket settings from existing sockets:
+// wideband0 shares port 1027 with incoming high priority data
+// wideband1 shares port 1028 with incoming DDC audio
+//
+  SocketData[VPORTWIDEBAND0].Socketid = SocketData[VPORTHIGHPRIORITYTOSDR].Socketid;
+  SocketData[VPORTWIDEBAND1].Socketid = SocketData[VPORTSPKRAUDIO].Socketid;
+  memcpy(&SocketData[VPORTWIDEBAND0].addr_cmddata, &SocketData[VPORTHIGHPRIORITYTOSDR].addr_cmddata, sizeof(struct sockaddr_in));
+  memcpy(&SocketData[VPORTWIDEBAND1].addr_cmddata, &SocketData[VPORTSPKRAUDIO].addr_cmddata, sizeof(struct sockaddr_in));
+  if(pthread_create(&WidebandDataThread, NULL, OutgoingWidebandSamples, (void*)&SocketData[VPORTWIDEBAND0]) < 0)
+  {
+    perror("pthread_create outgoing wideband data");
+    return EXIT_FAILURE;
+  }
+  pthread_detach(WidebandDataThread);
 
 
   //

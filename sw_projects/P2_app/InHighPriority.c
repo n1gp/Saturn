@@ -25,6 +25,8 @@
 #include <string.h>
 #include "../common/saturnregisters.h"
 #include "../common/hwaccess.h"                   // low level access
+#include "../common/version.h"
+#include "cathandler.h"
 
 
 
@@ -40,10 +42,14 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   struct msghdr datagram;                               // multiple incoming message header
   int size;                                             // UDP datagram length
   bool RunBit;                                          // true if "run" bit set
+  uint32_t DDCPhaseIncrement;                           // delta phase for a DDC
   uint8_t Byte, Byte2;                                  // received dat being decoded
   uint32_t LongWord;
   uint16_t Word;
   int i;                                                // counter
+  ESoftwareID FPGASWID;                                 // preprod/release etc
+  unsigned int FPGAVersion;                             // firmware version
+  bool PAEnable;
   int Client2;
 
   extern int TXActive;
@@ -52,6 +58,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
   ThreadData = (struct ThreadSocketData *)arg;
   ThreadData->Active = true;
   printf("spinning up high priority incoming thread with port %d\n", ThreadData->Portid);
+  FPGAVersion = GetFirmwareVersion(&FPGASWID);          // get version of FPGA code
 
   //
   // main processing loop
@@ -71,7 +78,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
     {
       perror("recvfrom, high priority");
       printf("error number = %d\n", errno);
-      return NULL;
+      return EXIT_FAILURE;
     }
     //
     // if correct packet, process it
@@ -164,6 +171,12 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       Byte = (uint8_t)(UDPInBuffer[345]);
       SetTXDriveLevel(Byte);
       //
+      // CAT port (if set)
+      //
+      Word = ntohs(*(uint16_t *)(UDPInBuffer+1398));
+      if(Word != 0)
+        SetupCATPort(Word);
+      //
       // transverter, speaker mute, open collector, user outputs
       //
       Byte = (uint8_t)(UDPInBuffer[1400]);
@@ -175,13 +188,45 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       SetUserOutputBits(Byte);
       //
       // Alex
-      //
+      // behaviour needs to be FPGA version specific: at V12, separate register added for Alex TX antennas
+      // if new FPGA version: we write the word with TX ANT (byte 1428) to a new register, and the "old" word to original register
+      // if we don't have a new TX ant bit set, just write "old" word data (byte 1432) to both registers
+      // this is to allow safe operation with legacy client apps
+      // 1st read bytes and see if a TX ant bit is set
+      Word = ntohs(*(uint16_t *)(UDPInBuffer+1428));
+      //printf("Alex 1 TX word = 0x%x\n", Word);
+      Word = (Word >> 8) & 0x0007;                          // new data TX ant bits. if not set, must be legacy client app
+      
+      if((FPGAVersion >= 12) && (Word != 0))                // if new firmware && client app supports it
+      {
+        //printf("new FPGA code, new client data\n");
+        Word = ntohs(*(uint16_t *)(UDPInBuffer+1428));      // copy word with TX ant settings to filt/TXant register
+        AlexManualTXFilters(Word, true);
+        Word = ntohs(*(uint16_t *)(UDPInBuffer+1432));      // copy word with RX ant settings to filt/RXant register
+        //printf("Alex 0 TX word = 0x%x\n", Word);
+        AlexManualTXFilters(Word, false);
+      }
+      else if(FPGAVersion >= 12)                            // new hardware but no client app support
+      {
+        //printf("new FPGA code, new client data\n");
+        Word = ntohs(*(uint16_t *)(UDPInBuffer+1432));      // copy word with TX/RX ant settings to both registers
+        AlexManualTXFilters(Word, true);
+        AlexManualTXFilters(Word, false);
+      }
+      else                                                  // old FPGA hardware
+      {
+        //printf("old FPGA code\n");
+        Word = ntohs(*(uint16_t *)(UDPInBuffer+1432));      // copy word with TX/RX ant settings to original register
+        AlexManualTXFilters(Word, false);
+      }
+
+      // RX filters
       Word = ntohs(*(uint16_t *)(UDPInBuffer+1430));
       AlexManualRXFilters(Word, 2);
-      Word = ntohs(*(uint16_t *)(UDPInBuffer+1432));
-      AlexManualTXFilters(Word);
+      //printf("Alex 1 RX word = 0x%x\n", Word);
       Word = ntohs(*(uint16_t *)(UDPInBuffer+1434));
       AlexManualRXFilters(Word, 0);
+      //printf("Alex 0 RX word = 0x%x\n", Word);
       //
       // RX atten during TX and RX
       // this should be just on RX now, because TX settings are in the DUC specific packet bytes 58&59

@@ -2,7 +2,7 @@
 # user access register
 # used for "version number" settig - currently a date code
 #
-set_property BITSTREAM.CONFIG.USR_ACCESS 0x30092023 [current_design]
+set_property BITSTREAM.CONFIG.USR_ACCESS 0x16112024 [current_design]
 
 #SPI_BUSWIDTH sets the read commands into bit file.
 #CONFIG_MODE SPIx4 is for Vivado tool to check DRC. 
@@ -223,6 +223,11 @@ set_property IOSTANDARD LVCMOS33 [get_ports {PROM_SPI_ss_io[0]}]
 set_property IOSTANDARD LVCMOS33 [get_ports TX_ENABLE]
 set_property IOSTANDARD LVCMOS33 [get_ports {PCI_LINK_LED[0]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {BLINK_LED[0]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {pcb_version_id[0]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {pcb_version_id[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {pcb_version_id[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {pcb_version_id[3]}]
+
 
 set_property DRIVE 12 [get_ports ADC1_ATTEN_CLK]
 set_property SLEW SLOW [get_ports MCLK]
@@ -270,7 +275,10 @@ set_property PACKAGE_PIN A11 [get_ports {pcie_7x_mgt_rtl_0_rxn[3]}]
 set_property PACKAGE_PIN B11 [get_ports {pcie_7x_mgt_rtl_0_rxp[3]}]
 set_property PACKAGE_PIN A7 [get_ports {pcie_7x_mgt_rtl_0_txn[3]}]
 set_property PACKAGE_PIN B7 [get_ports {pcie_7x_mgt_rtl_0_txp[3]}]
-
+set_property PACKAGE_PIN E3 [get_ports {pcb_version_id[0]}]
+set_property PACKAGE_PIN C2 [get_ports {pcb_version_id[1]}]
+set_property PACKAGE_PIN B2 [get_ports {pcb_version_id[2]}]
+set_property PACKAGE_PIN A3 [get_ports {pcb_version_id[3]}]
 
 
 #PROHIBIT BANKS 12, 33
@@ -569,10 +577,13 @@ set_property PACKAGE_PIN N23 [get_ports {ADC2_In_P[2]}]
 set_property PACKAGE_PIN P23 [get_ports {ADC2_In_P[1]}]
 set_property PACKAGE_PIN M21 [get_ports {ADC2_In_P[0]}]
 
-
+# pullups on SPI signals, and on the Version ID inputs
 set_property PULLUP true [get_ports CODEC_SPI_CLK]
 set_property PULLUP true [get_ports CODEC_SPI_DATA]
-
+set_property PULLUP true [get_ports {pcb_version_id[0]}]
+set_property PULLUP true [get_ports {pcb_version_id[1]}]
+set_property PULLUP true [get_ports {pcb_version_id[2]}]
+set_property PULLUP true [get_ports {pcb_version_id[3]}]
 
 set_property OFFCHIP_TERM NONE [get_ports ADC1_ATTEN_CLK]
 set_property OFFCHIP_TERM NONE [get_ports ADC1_ATTEN_DAT]

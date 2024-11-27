@@ -37,6 +37,7 @@
 #define VSTARTUPDELAY 100                           // 100 messages (~100ms) before reporting under or overflows
 
 
+    int DMAReadfile_fd = -1;								// DMA read file device (global, used also by wideband)
 
 // this runs as its own thread to send outgoing data
 // thread initiated after a "Start" command
@@ -69,7 +70,6 @@ void *OutgoingMicSamples(void *arg)
     unsigned char* MicHeadPtr;								// ptr to 1st free location in mic memory
     unsigned char* MicBasePtr;								// ptr to DMA location in mic memory
     uint32_t Depth = 0;
-    int DMAReadfile_fd = -1;								// DMA read file device
     uint32_t RegisterValue;
     bool FIFOOverflow, FIFOUnderflow, FIFOOverThreshold;
     unsigned int Current;                                   // current occupied locations in FIFO
@@ -130,7 +130,7 @@ void *OutgoingMicSamples(void *arg)
   //
     while (!InitError)
     {
-        while(!SDRActive)
+        while(!(SDRActive))
         {
             if(ThreadData->Cmdid & VBITCHANGEPORT)
             {
@@ -139,7 +139,7 @@ void *OutgoingMicSamples(void *arg)
                 MakeSocket(ThreadData, 0);                        // this binds to the new port.
                 ThreadData->Cmdid &= ~VBITCHANGEPORT;             // clear command bit
             }
-            usleep(10000);
+            usleep(100);
         }
     //
     // if we get here, run has been initiated
@@ -165,8 +165,12 @@ void *OutgoingMicSamples(void *arg)
             // now wait until there is data, then DMA it
             //
             Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);			// read the FIFO Depth register. 4 mic words per 64 bit word.
-            if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
-                printf("Codec Mic FIFO Overthreshold, depth now = %d\n", Current);
+            if((StartupCount == 0) && FIFOOverThreshold)
+            {
+                GlobalFIFOOverflows |= 0b00000010;
+                if(UseDebug)
+                    printf("Codec Mic FIFO Overthreshold, depth now = %d\n", Current);
+            }
 // note this would often generate a message because we deliberately read it down to zero.
 // this isn't a problem as we can send the data on without the code becoming blocked.
 //            if((StartupCount == 0) && FIFOUnderflow)
@@ -175,12 +179,19 @@ void *OutgoingMicSamples(void *arg)
             {
                 usleep(1000);								        // 1ms wait
                 Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);				// read the FIFO Depth register
-                if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
-                    printf("Codec Mic FIFO Overthreshold, depth now = %d\n", Current);
+                if((StartupCount == 0) && FIFOOverThreshold)
+                {
+                    GlobalFIFOOverflows |= 0b00000010;
+                    if(UseDebug)
+                        printf("Codec Mic FIFO Overthreshold, depth now = %d\n", Current);
+                }
 //                if((StartupCount == 0) && FIFOUnderflow)
 //                    printf("Codec Mic FIFO Underflowed, depth now = %d\n", Current);
             }
+            // DMA shared with wideband samples, so get semaphore granting access
+            sem_wait(&MicWBDMAMutex);                       // get protected access
             DMAReadFromFPGA(DMAReadfile_fd, MicBasePtr, VDMATRANSFERSIZE, VADDRMICSTREAMREAD);
+            sem_post(&MicWBDMAMutex);                       // get protected access
 
             if(SDRActive) // some programs stop communicating if this msg isn't sent (SparkSDR)
             {

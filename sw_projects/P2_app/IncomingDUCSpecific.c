@@ -47,6 +47,8 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
     uint8_t SidetoneVolume;
     uint8_t CWRFDelay;
     uint16_t CWHangDelay;
+    uint8_t CWRampTime;
+    uint32_t CWRampTime_us;
     int Client2;
 
     extern uint32_t SDRIP, SDRIP2;
@@ -71,7 +73,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
       if(size < 0 && errno != EAGAIN)
       {
           perror("recvfrom, DUC specific");
-          return NULL;
+          return EXIT_FAILURE;
       }
       if(size == VDUCSPECIFICSIZE)
       {
@@ -91,6 +93,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
             if(TXActive == 2) continue;
           }
 
+          //printf("DUC packet received\n");
 // iambic settings
           IambicSpeed = *(uint8_t*)(UDPInBuffer+9);               // keyer speed
           IambicWeight = *(uint8_t*)(UDPInBuffer+10);             // keyer weight
@@ -110,6 +113,12 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
           CWHangDelay = ntohs(CWHangDelay);                       // convert from big endian
           SetCWPTTDelay(CWRFDelay);
           SetCWHangTime(CWHangDelay);
+          CWRampTime = *(uint8_t*)(UDPInBuffer+17);               // ramp transition time
+          if(CWRampTime != 0)                                     // if ramp period supported by client app
+          {
+              CWRampTime_us = 1000 * CWRampTime;
+              InitialiseCWKeyerRamp(true, CWRampTime_us);         // create required ramp, P2
+          }
 // mic and line in options
           Byte = *(uint8_t*)(UDPInBuffer+50);                     // mic/line options
           SetMicBoost((bool)((Byte >> 1)&1));

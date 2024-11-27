@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include "version.h"
+#include <stdio.h>
 
 //
 // semaphores to protect registers that are accessed from several threads
@@ -68,7 +69,8 @@ bool GPPSEnabled;                                   // NOT CURRENTLY USED - trie
 uint32_t GTXDACCtrl;                                // TX DAC current setting & atten
 uint32_t GRXADCCtrl;                                // RX1 & 2 attenuations
 bool GAlexRXOut;                                    // P1 RX output bit (NOT USED)
-uint32_t GAlexTXRegister;                           // 16 bit used of 32 
+uint32_t GAlexTXFiltRegister;                       // 16 bit used of 32 
+uint32_t GAlexTXAntRegister;                        // 16 bit used of 32 
 uint32_t GAlexRXRegister;                           // 32 bit RX register 
 bool GRX2GroundDuringTX;                            // true if RX2 grounded while in TX
 uint32_t GAlexCoarseAttenuatorBits;                 // Alex coarse atten NOT USED  
@@ -89,10 +91,9 @@ bool GSidetoneEnabled;                              // true if sidetone is enabl
 unsigned int GSidetoneVolume;                       // assigned sidetone volume (8 bit signed)
 bool GWidebandADC1;                                 // true if wideband on ADC1. For P2 - not used yet.
 bool GWidebandADC2;                                 // true if wideband on ADC2. For P2 - not used yet.
-unsigned int GWidebandSampleCount;                  // P2 - not used yet
-unsigned int GWidebandSamplesPerPacket;             // P2 - not used yet
-unsigned int GWidebandUpdateRate;                   // update rate in ms. P2 - not used yet. 
-unsigned int GWidebandPacketsPerFrame;              // P2 - not used yet
+uint32_t GWidebandSampleCount;                      // sample count (in 64 bit words) for wideband collection
+uint32_t GWidebandUpdateRate;                       // update rate in clock ticks
+uint32_t GWidebandControl;                          // Wideband control register
 unsigned int GAlexEnabledBits;                      // P2. True if Alex1-8 enabled. NOT USED YET.
 bool GPAEnabled;                                    // P2. True if PA enabled. NOT USED YET.
 unsigned int GTXDACCount;                           // P2. #TX DACs. NOT USED YET.
@@ -117,7 +118,9 @@ ETXModulationSource GTXModulationSource;            // values added to register
 bool GTXProtocolP2;                                 // true if P2
 uint32_t TXModulationTestReg;                       // modulation test DDS
 bool GEnableTimeStamping;                           // true if timestamps to be added to data. NOT IMPLEMENTED YET
-bool GEnableVITA49;                                 // true if tyo enable VITA49 formatting. NOT SUPPORTED YET
+bool GEnableVITA49;                                 // true if to enable VITA49 formatting. NOT SUPPORTED YET
+unsigned int GCWKeyerRampms = 0;                    // ramp length for keyer, in ms
+bool GCWKeyerRamp_IsP2 = false;                     // true if ramp initialised for protocol 2
 
 unsigned int DACCurrentROM[256];                    // used for residual attenuation
 unsigned int DACStepAttenROM[256];                  // provides most atten setting
@@ -199,8 +202,9 @@ uint32_t DDCRegisters[VNUMDDC] =
 //
 // ALEX SPI registers
 //
-#define VOFFSETALEXTXREG 0                              // offset addr in IP core
+#define VOFFSETALEXTXFILTREG 0                          // offset addr in IP core: TX filt, RX ant
 #define VOFFSETALEXRXREG 4                              // offset addr in IP core
+#define VOFFSETALEXTXANTREG 8                           // offset addr in IP core: TX filt, TX ant
 
 
 //
@@ -237,7 +241,8 @@ uint32_t DDCRegisters[VNUMDDC] =
 #define V13_8VDETECTBIT 8
 #define VATUTUNECOMPLETEBIT 9
 #define VPLLLOCKED 10
-#define VCWKEYDOWN 11                   // keyer output 
+#define VCWKEYDOWN 11                   // key ramp generator output 
+#define VCWKEYPRESSED 12                // keyer request for TX active
 #define VEXTTXENABLEBIT 31
 
 
@@ -248,7 +253,7 @@ uint32_t DDCRegisters[VNUMDDC] =
 #define VCWKEYERDELAY 0                                 // delay bits 7:0
 #define VCWKEYERHANG 8                                  // hang time is 17:8
 #define VCWKEYERRAMP 18                                 // ramp time
-#define VRAMPSIZE 2048                                  // max ramp length in words
+#define VRAMPSIZE 4096                                  // max ramp length in words
 
 
 //
@@ -292,11 +297,19 @@ void InitialiseFIFOSizes(void)
 	ESoftwareID ID;
 	unsigned int Version = 0;
     Version = GetFirmwareVersion(&ID);
-    if(Version >= 10)
+    if((Version >= 10) && (Version <= 12))
     {
-        printf("loading new FIFO sizes for updated firmware\n");
+        printf("loading new FIFO sizes for updated firmware <= 12\n");
         DMAFIFODepths[0] = 16384;       //  eRXDDCDMA,		selects RX
         DMAFIFODepths[1] = 2048;        //  eTXDUCDMA,		selects TX
+        DMAFIFODepths[2] = 256;         //  eMicCodecDMA,	selects mic samples
+        DMAFIFODepths[3] = 1024;        //  eSpkCodecDMA	selects speaker samples
+    }
+    else if(Version >= 13)
+    {
+        printf("loading new FIFO sizes for updated firmware V13+\n");
+        DMAFIFODepths[0] = 16384;       //  eRXDDCDMA,		selects RX
+        DMAFIFODepths[1] = 4096;        //  eTXDUCDMA,		selects TX
         DMAFIFODepths[2] = 256;         //  eMicCodecDMA,	selects mic samples
         DMAFIFODepths[3] = 1024;        //  eSpkCodecDMA	selects speaker samples
     }
@@ -851,12 +864,13 @@ void SetAlexRXOut(bool Enable)
 // P1: set the Alex TX antenna bits.
 // bits=00: ant1; 01: ant2; 10: ant3; other: chooses ant1
 // set bits 10-8 in Alex TX reg
+// NOTE a new explicit setRXant will now be needed too from FPGA V12
 //
 void SetAlexTXAnt(unsigned int Bits)
 {
     uint32_t Register;                                  // modified register
 
-    Register = GAlexTXRegister;                         // copy original register
+    Register = GAlexTXAntRegister;                         // copy original register
     Register &= 0xFCFF;                                 // turn off all affected bits
 
     switch(Bits)
@@ -875,9 +889,9 @@ void SetAlexTXAnt(unsigned int Bits)
             Register |=0x0400;                          // turn on ANT3
             break;
     }
-    if(Register != GAlexTXRegister)                     // write back if changed
+    if(Register != GAlexTXAntRegister)                     // write back if changed
     {
-        GAlexTXRegister = Register;
+        GAlexTXAntRegister = Register;
 //        RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXREG, Register);  // and write to it
     }
 }
@@ -948,20 +962,33 @@ void SetRX2GroundDuringTX(bool IsGrounded)
 // SetAlexTXFilters(unsigned int Bits)
 // P1: set the Alex bits for TX LPF filter selection
 // Bits follows the P1 protocol format. C0=0x12, byte C4 has TX
+// from FPGA V12, the same data needs to go into the TXfilter/TX antenna register
+// because the filter settings are in both
 //
 void SetAlexTXFilters(unsigned int Bits)
 {
     uint32_t Register;                                          // modified register
     if(GAlexManualFilterSelect)
     {
-        Register = GAlexTXRegister;                         // copy original register
+        Register = GAlexTXFiltRegister;                         // copy original register
         Register &= 0x1F0F;                                 // turn off all affected bits
         Register |= (Bits & 0x0F)<<4;                       // bits 3-0, moved up
         Register |= (Bits & 0x1C)<<9;                      // bits 6-4, moved up
 
-        if(Register != GAlexTXRegister)                     // write back if changed
+        if(Register != GAlexTXFiltRegister)                     // write back if changed
         {
-            GAlexTXRegister = Register;
+            GAlexTXFiltRegister = Register;
+    //        RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXREG, Register);  // and write to it
+        }
+
+        Register = GAlexTXAntRegister;                         // copy original register
+        Register &= 0x1F0F;                                 // turn off all affected bits
+        Register |= (Bits & 0x0F)<<4;                       // bits 3-0, moved up
+        Register |= (Bits & 0x1C)<<9;                      // bits 6-4, moved up
+
+        if(Register != GAlexTXAntRegister)                     // write back if changed
+        {
+            GAlexTXAntRegister = Register;
     //        RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXREG, Register);  // and write to it
         }
     }
@@ -1026,17 +1053,24 @@ void DisableAlexTRRelay(bool IsDisabled)
 // P2: provides a 16 bit word with all of the Alex settings for TX
 // must be formatted according to the Alex specification
 // must be enabled by calling EnableAlexManualFilterSelect(true) first!
+// FPGA V12 onwards: uses an additional register with TX ant settings
+// HasTXAntExplicitly true if data is for the new TXfilter, TX ant register
 //
-void AlexManualTXFilters(unsigned int Bits)
+void AlexManualTXFilters(unsigned int Bits, bool HasTXAntExplicitly)
 {
     uint32_t Register;                                  // modified register
     if(GAlexManualFilterSelect)
     {
         Register = Bits;                         // new setting
-        if(Register != GAlexTXRegister)                     // write back if changed
+        if(HasTXAntExplicitly && (Register != GAlexTXAntRegister))
         {
-            GAlexTXRegister = Register;
-            RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXREG, Register);  // and write to it
+            GAlexTXAntRegister = Register;
+            RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXANTREG, Register);  // and write to it
+        }
+        else if(!HasTXAntExplicitly &&(Register != GAlexTXFiltRegister))                     // write back if changed
+        {
+            GAlexTXFiltRegister = Register;
+            RegisterWrite(VADDRALEXSPIREG+VOFFSETALEXTXFILTREG, Register);  // and write to it
         }
     }
 }
@@ -1422,21 +1456,34 @@ void SetRXDDCEnabled(bool IsEnabled)
     sem_post(&DDCInSelMutex);
 }
 
+#define VMINCWRAMPDURATION 3000                     // 3ms min
+#define VMAXCWRAMPDURATION 10000                    // 10ms max
+#define VMAXCWRAMPDURATIONV14PLUS 20000             // 20ms max
+#define VCWAMPLITUDE 7549746.0F                     // 0.9*max amplitude to match Tune etc
 
 
 //
 // InitialiseCWKeyerRamp(bool Protocol2, uint32_t Length_us)
 // calculates an "S" shape ramp curve and loads into RAM
 // needs to be called before keyer enabled!
-// parameter is length in microseconds; typically 1000-5000
-// setup ramp memory and rampl length fields
+// parameter is length in microseconds; typically 5000-10000
+// setup ramp memory and ramp length fields
+// only calculate if paramters have changed!
 //
 void InitialiseCWKeyerRamp(bool Protocol2, uint32_t Length_us)
 {
-    const double a0 = 0.35875;
-    const double a1 = -0.48829;
-    const double a2 = 0.14128;
-    const double a3 = -0.01168;
+    const double c1 = -0.12182865361171612;
+    const double c2 = -0.018557469249199286;
+    const double c3 = -0.0009378783245428506;
+    const double c4 = 0.0008567571519403228;
+    const double c5 = 0.00018706912431472442;
+
+
+    const double twopi = 6.28318530717959;
+    const double fourpi = 12.56637061435920;
+    const double sixpi = 18.84955592153880;
+    const double eightpi = 25.13274122871830;
+    const double tenpi = 31.41592653589790;
     double LargestSample;
     double Fraction;                         // fractional position in ramp
     double SamplePeriod;                     // sample period in us
@@ -1446,47 +1493,67 @@ void InitialiseCWKeyerRamp(bool Protocol2, uint32_t Length_us)
     uint32_t Cntr;
     uint32_t Sample;                        // ramp sample value
     uint32_t Register;
+    ESoftwareID ID;
+    unsigned int FPGAVersion = 0;
+    unsigned int MaxDuration;               // max ramp duration in microseconds
+    double x, x2, x4, x6, x8, x10, rampsample;
 
-// work out required length    
-    if(Protocol2)
-        SamplePeriod = 1000.0/192.0;
+    FPGAVersion = GetFirmwareVersion(&ID);
+    if(FPGAVersion >= 14)
+        MaxDuration = VMAXCWRAMPDURATIONV14PLUS;        // get version dependent max length
     else
-        SamplePeriod = 1000.0/48.0;
-    RampLength = (uint32_t)(((double)Length_us / SamplePeriod) + 1);
-//
-// calculate basic ramp shape
-// see "CW shaping in DSP software" by Alex Shovkoplyas VE3NEA)
-//
-    RampSample[0] = 0.0;
-    for(Cntr=1; Cntr < RampLength; Cntr++)
-    {
-        Fraction = (double)Cntr / (double)RampLength;
-        RampSample[Cntr] = RampSample[Cntr-1] +a0 +a1*cos(2.0*M_PI*Fraction) 
-                           +a2*cos(4.0*M_PI*Fraction) +a3*cos(6.0*M_PI*Fraction);
-    }
-    LargestSample = RampSample[RampLength-1];
-//
-// now go through and rescale to 2^23-1 max
-// that's the peak amplitude for I/Q in Saturn, either protocol
-//
-    for(Cntr=0; Cntr < RampLength; Cntr++)
-    {
-        Sample = (uint32_t)((RampSample[Cntr]/LargestSample) * 8388607.0);
-        RegisterWrite(VADDRCWKEYERRAM + 4*Cntr, Sample);
-//        printf("sample: %d = %d\n", Cntr, Sample);
-    }
-    for(Cntr = RampLength; Cntr < VRAMPSIZE; Cntr++)
-        RegisterWrite(VADDRCWKEYERRAM + 4*Cntr, 8388607);
+        MaxDuration = VMAXCWRAMPDURATION;
 
-//
-// finally write the ramp length
-//
-    Register = GCWKeyerSetup;                    // get current settings
-    Register &= 0x8003FFFF;                      // strip out ramp bits
-    Register |= ((RampLength << 2) << VCWKEYERRAMP);        // byte end address
-    GCWKeyerSetup = Register;                    // store it back
-    RegisterWrite(VADDRKEYERCONFIGREG, Register);  // and write to it
+    // first find out if the length is OK and clip if not
+    if(Length_us < VMINCWRAMPDURATION)
+        Length_us = VMINCWRAMPDURATION;
+    if(Length_us > MaxDuration)
+        Length_us = MaxDuration;
 
+    // now apply that ramp length
+    if((Length_us != GCWKeyerRampms) || (Protocol2 != GCWKeyerRamp_IsP2)) 
+    {
+        GCWKeyerRampms = Length_us;
+        GCWKeyerRamp_IsP2 = Protocol2;
+        printf("calculating new CW ramp, length = %d us\n", Length_us);
+        // work out required length in samples
+        if(Protocol2)
+            SamplePeriod = 1000.0/192.0;
+        else
+            SamplePeriod = 1000.0/48.0;
+        RampLength = (uint32_t)(((double)Length_us / SamplePeriod) + 1);
+//
+// DL1YCF ramp code:
+//
+//
+        for(Cntr=0; Cntr < RampLength; Cntr++)
+        {
+            x = (double) Cntr / (double) RampLength;           // between 0 and 1
+            x2 = x * twopi;         // 2 Pi x
+            x4 = x * fourpi;        // 4 Pi x
+            x6 = x * sixpi;         // 6 Pi x
+            x8 = x * eightpi;       // 8 Pi x
+            x10 = x * tenpi;        // 10 Pi x
+            rampsample = x + c1 * sin(x2) + c2 * sin(x4) + c3 * sin(x6) + c4 * sin(x8) + c5 * sin(x10);
+            Sample = (uint32_t) (rampsample * VCWAMPLITUDE);
+            RegisterWrite(VADDRCWKEYERRAM + 4*Cntr, Sample);
+        }
+        for(Cntr = RampLength; Cntr < VRAMPSIZE; Cntr++)                        // fill remainder of RAM
+            RegisterWrite(VADDRCWKEYERRAM + 4*Cntr, (unsigned long)VCWAMPLITUDE);
+
+    //
+    // finally write the ramp length
+    // in FPGA V14 onwards this is a word address
+        Register = GCWKeyerSetup;                    // get current settings
+        Register &= 0x8003FFFF;                      // strip out ramp bits
+        if(FPGAVersion >= 14)
+            Register |= (RampLength << VCWKEYERRAMP);        // word end address
+        else
+            Register |= ((RampLength << 2) << VCWKEYERRAMP);        // byte end address
+
+        GCWKeyerSetup = Register;                    // store it back
+        RegisterWrite(VADDRKEYERCONFIGREG, Register);  // and write to it
+    }
 }
 
 
@@ -1662,63 +1729,81 @@ void SetXvtrEnable(bool Enabled)
     sem_post(&RFGPIOMutex);                         // clear protected access
 }
 
+unsigned int GWidebandSampleCount;                  // P2 - not used yet
+unsigned int GWidebandUpdateRate;                   // update rate in ms. P2 - not used yet. 
+unsigned int GWidebandControl;                      // P2 - wideband control register
+#define VADDRWIDEBANDCONTROLREG 0xD000
+#define VADDRWIDEBANDPERIODREG 0xD004
+#define VADDRWIDEBANDDEPTHREG 0xD008
+#define VADDRWIDEBANDSTATUSREG 0xD00C
+
 
 //
-// SetWidebandEnable(EADCSelect ADC, bool Enabled)
+// SetWidebandEnable(bool ADC0, bool ADC1, bool DataCollected)
 // enables wideband sample collection from an ADC.
-// P2 - not yet implemented
+// enable bits for each ADC; and a bit to set the "data collected" flag
+// ALWAYS DO A WRITE to the control register;
 //
-void SetWidebandEnable(EADCSelect ADC, bool Enabled)
+void SetWidebandEnable(bool ADC0, bool ADC1, bool DataCollected)
 {
-    if(ADC == eADC1)                        // if ADC1 save its state
-        GWidebandADC1 = Enabled; 
-    else if(ADC == eADC2)                   // similarly for ADC2
-        GWidebandADC2 = Enabled; 
+    uint32_t Register = 0;
+    Register = ((uint32_t)ADC0)&1;
+    Register |= (((uint32_t)ADC1)&1)<<1;
+    Register |= (((uint32_t)DataCollected)&1)<<2;
 
+    RegisterWrite(VADDRWIDEBANDCONTROLREG, Register);   // and write to it
 }
 
 
 //
-// SetWidebandSampleCount(unsigned int Samples)
-// sets the wideband data collected count
-// P2 - not yet implemented
+// SetWidebandSampleCount(uint32_t SampleWords)
+// sets the wideband data collected count, in 64 bit words
+// the register setting is one less than this!
 //
 void SetWidebandSampleCount(unsigned int Samples)
 {
-    GWidebandSampleCount = Samples;
+    uint32_t Register;
+    Register = Samples - 1;
+    if(Register != GWidebandSampleCount)                     // write back if different
+    {
+        GWidebandSampleCount = Register;                     // store it back
+        RegisterWrite(VADDRWIDEBANDDEPTHREG, Register);   // and write to it
+    }
 }
 
 
-//
-// SetWidebandSampleSize(unsigned int Bits)
-// sets the sample size per packet used for wideband data transfers
-// P2 - not yet implemented
-//
-void SetWidebandSampleSize(unsigned int Bits)
-{
-    GWidebandSamplesPerPacket = Bits;
-}
 
 
 //
 // SetWidebandUpdateRate(unsigned int Period_ms)
-// sets the period (ms) between collections of wideband data
-// P2 - not yet implemented
+// sets the period (milliseconds) between collections of wideband data
 //
 void SetWidebandUpdateRate(unsigned int Period_ms)
 {
-    GWidebandUpdateRate = Period_ms;
+    uint32_t Register;
+    Register = Period_ms * 122880;                          // convert to ticks
+    if(Register != GWidebandUpdateRate)                     // write back if different
+    {
+        GWidebandUpdateRate = Register;                     // store it back
+        RegisterWrite(VADDRWIDEBANDPERIODREG, Register);    // and write to it
+    }
 }
 
 
 //
-// SetWidebandPacketsPerFrame(unsigned int Count)
-// sets the number of packets to be transferred per wideband data frame
-// P2 - not yet implemented
+// uint32_t GetWidebandStatus(bool *ADC0Data, bool *ADC1Data)
+// returns the number of 64 bit words in the Wideband data FIFO
+// also returns as paramters the flags saying if there is readable data
+// from each ADC.
 //
-void SetWidebandPacketsPerFrame(unsigned int Count)
+uint32_t GetWidebandStatus(bool *ADC0Data, bool *ADC1Data)
 {
-    GWidebandPacketsPerFrame = Count;
+    uint32_t Register, Depth;
+    Register = RegisterRead(VADDRWIDEBANDSTATUSREG);         // read status reg
+    *ADC0Data = (bool)((Register >> 30) & 1);
+    *ADC1Data = (bool)((Register >> 31) & 1);
+    Depth = (Register & 0x3FFFFFFF);                        // strip top 2 bits to get FIFO depth
+    return Depth;
 }
 
 
@@ -1929,6 +2014,7 @@ bool GetCWKeyDown(void)
 // bit 1 - true if CW dot input active
 // bit 2 - true if CW dash input active or IO8 active
 // bit 4 - true if 10MHz to 122MHz PLL is locked
+// bit 7 - CW key down (ie key input, not keyer ramp PTT)
 // note that PTT declared if PTT pressed, or CW key is pressed.
 // note that PTT & key bits are inverted by hardware, but IO4/5/6/8 are not.
 //
@@ -1949,8 +2035,8 @@ unsigned int GetP2PTTKeyInputs(void)
         Result |= 4;                                                        // set dash output bit if IO8 active
     if ((GStatusRegister >> VPLLLOCKED) & 1)
         Result |= 16;                                                       // set PLL output bit
-    if ((GStatusRegister >> VCWKEYDOWN) & 1)
-        Result |= 1;                                                        // set PTT if keyer asserted TX
+    if ((GStatusRegister >> VCWKEYPRESSED) & 1)
+        Result |= 128;                                                      // set PTT if keyer requested TX
     return Result;
 }
 
@@ -1975,12 +2061,14 @@ unsigned int GetADCOverflow(void)
 //
 // GetUserIOBits(void)
 // return the user input bits
-// returns IO4 in LSB, IO8 in bot 3
+// returns IO4 in LSB, IO5 in bit 1, ATU bit in bit 2 & IO8 in bit 3
 //
 unsigned int GetUserIOBits(void)
 {
     unsigned int Result = 0;
-    Result = ((GStatusRegister >> VUSERIO4) & 0b1111);                       // get usder input 4/5/6/8
+    Result = ((GStatusRegister >> VUSERIO4) & 0b1011);                       // get user input 4/5/-/8
+    Result = Result ^ 0x8;                                                   // invert IO8 (should be active low)
+    Result |= ((GStatusRegister >> 7) & 0b0100);                             // get ATU bit into IO6 location
 
     return Result;
 }

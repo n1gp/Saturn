@@ -20,10 +20,16 @@
 #include <sys/socket.h>
 #include "generalpacket.h"
 #include "../common/saturnregisters.h"
+#include "Outwideband.h"
 
 
 bool HW_Timer_Enable = true;
 bool HW_Timer_Enable2 = true;
+uint8_t WidebandEnables;
+uint16_t WidebandSampleCount;
+uint8_t WidebandSampleSize;
+uint8_t WidebandUpdateRate;
+uint8_t WidebandPacketsPerFrame;
 
 //
 // protocol 2 handler for General Packet to SDR
@@ -76,17 +82,13 @@ int HandleGeneralPacket(uint8_t *PacketBuffer, int client)
 // now set the other data carried by this packet
 // wideband capture data:
 //
-  Byte = *(uint8_t*)(PacketBuffer+23);                // get wideband enables
-  SetWidebandEnable(eADC1, (bool)(Byte&1));
-  SetWidebandEnable(eADC2, (bool)(Byte&2));
-  Port = ntohs(*(uint16_t*)(PacketBuffer+24));        // wideband sample count
-  SetWidebandSampleCount(Port);
-  Byte = *(uint8_t*)(PacketBuffer+26);                // wideband sample size
-  SetWidebandSampleSize(Byte);
-  Byte = *(uint8_t*)(PacketBuffer+27);                // wideband update rate
-  SetWidebandUpdateRate(Byte);
-  Byte = *(uint8_t*)(PacketBuffer+28);                // wideband packets per frame
-  SetWidebandPacketsPerFrame(Byte);
+  WidebandEnables = *(uint8_t*)(PacketBuffer+23);                // get wideband enables
+  WidebandSampleCount = ntohs(*(uint16_t*)(PacketBuffer+24));        // wideband sample count
+  WidebandSampleSize = *(uint8_t*)(PacketBuffer+26);                // wideband sample size
+  WidebandUpdateRate = *(uint8_t*)(PacketBuffer+27);                // wideband update rate
+  WidebandPacketsPerFrame = *(uint8_t*)(PacketBuffer+28);                // wideband packets per frame
+  SetWidebandParams(WidebandEnables, WidebandSampleCount, WidebandSampleSize, WidebandUpdateRate, WidebandPacketsPerFrame);
+
 //
 // envelope PWM data:
 //

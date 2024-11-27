@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include "../common/saturntypes.h"
+#include <semaphore.h>
 
 
 //
@@ -82,6 +83,8 @@ extern bool NewMessageReceived2;                    // set whenever a message is
 extern bool ThreadError;                            // set true if a thread reports an error
 extern int TXActive;                                // The client actively transmitting, 0-none, 1-SDRIP, 2-SDRIP2
 extern bool UseDebug;                               // true if debugging enabled
+extern uint8_t GlobalFIFOOverflows;                 // FIFO overflow words
+extern sem_t MicWBDMAMutex;                         // protect one DMA read channel shared by mic and WB read
 
 #define VBITCHANGEPORT 1                        // if set, thread must close its socket and open a new one on different port
 #define VBITINTERLEAVE 2                        // if set, DDC threads should interleave data
@@ -108,6 +111,10 @@ void SetPort(uint32_t ThreadNum, uint16_t PortNum);
 //
 int MakeSocket(struct ThreadSocketData* Ptr, int DDCid);
 
+//
+// function ot get program version
+//
+uint32_t GetP2appVersion(void);
 
 
 

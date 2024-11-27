@@ -25,8 +25,10 @@
 #include <string.h>
 #include <fcntl.h>
 #include "../common/saturnregisters.h"
+#include "LDGATU.h"
 
 
+uint8_t GlobalFIFOOverflows = 0;             // FIFO overflow words
 
 
 // this runs as its own thread to send outgoing data
@@ -51,6 +53,10 @@ void *OutgoingHighPriority(void *arg)
   int Error;
   uint8_t Byte;                                   // data being encoded
   uint16_t Word;                                  // data being encoded
+  bool ATUTuneRequest = false;
+  bool FIFOOverflow, FIFOUnderflow, FIFOOverThreshold;      // FIFO flags
+  uint32_t Depth = 0;                                       // FIFO locations available
+  uint8_t FIFOOverflows;
 
 //
 // initialise. Create memory buffers and open DMA file devices
@@ -75,7 +81,7 @@ void *OutgoingHighPriority(void *arg)
         MakeSocket(ThreadData, 0);                        // this binds to the new port.
         ThreadData->Cmdid &= ~VBITCHANGEPORT;             // clear command bit
       }
-      usleep(10000);
+      usleep(100);
     }
     //
     // if we get here, run has been initiated
@@ -105,7 +111,7 @@ void *OutgoingHighPriority(void *arg)
     //
     while((SDRActive || SDRActive2) && !InitError)              // main loop
     {
-      uint8_t SleepCount;                                       // counter for sending next message
+      uint16_t SleepCount;                                      // counter for sending next message
       uint8_t PTTBits;                                          // PTT bits - and change means a new message needed
       // create the packet
       memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
@@ -130,6 +136,40 @@ void *OutgoingHighPriority(void *arg)
 
       Byte = (uint8_t)GetUserIOBits();                  // user I/O bits
       *(uint8_t *)(UDPBuffer+59) = Byte;
+
+//
+// protocol V4.3: send FIFO depths and error states
+// we can read a snapshot now, but under or overflows could have happened at other times too
+// and they are cleared by the data transfer reads of the monitor channel
+//
+      FIFOOverflows = 0;
+      Depth = ReadFIFOMonitorChannel(eRXDDCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Word);				// read the DDC FIFO Depth register
+      *(uint16_t *)(UDPBuffer+31) = htons(Word);                // DDC ssmples
+      if(FIFOOverThreshold)
+        FIFOOverflows |= 0b00000001;
+
+      Depth = ReadFIFOMonitorChannel(eMicCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Word);				// read the mic FIFO Depth register
+      Word = Word*4;                                            // 4 samples per FIFO location
+      *(uint16_t *)(UDPBuffer+33) = htons(Word);                // mic samples
+      if(FIFOOverThreshold)
+        FIFOOverflows |= 0b00000010;
+
+      Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Word);				// read the DUC FIFO Depth register
+      Word = (Word*4)/3;                                        // 4/3 samples per FIFO location
+      *(uint16_t *)(UDPBuffer+35) = htons(Word);                // DUC samples
+      if(FIFOUnderflow)
+        FIFOOverflows |= 0b00000100;
+
+      Depth = ReadFIFOMonitorChannel(eSpkCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Word);				// read the speaker FIFO Depth register
+      Word = Word*2;                                            // 2 samples per FIFO location
+      *(uint16_t *)(UDPBuffer+37) = htons(Word);                // speaker samples
+      if(FIFOUnderflow)
+        FIFOOverflows |= 0b00001000;
+
+      FIFOOverflows |= GlobalFIFOOverflows;                   // copy in any bits set during normal data transfer
+      *(uint8_t *)(UDPBuffer+30) = FIFOOverflows;
+      GlobalFIFOOverflows = 0;                                // clear any overflows
+      FIFOOverflows = 0;
 
       if(SDRActive)
       {
@@ -157,6 +197,12 @@ void *OutgoingHighPriority(void *arg)
           memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
           Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
 
+      //
+      // get ATU bit and offer to LDG ATU handler
+      // power requested if bit 2 is zero
+      Byte = ((Byte >> 2) & 1) ^1;
+      ATUTuneRequest = (bool)Byte;
+      RequestATUTune(ATUTuneRequest);
           if(Error == -1)
           {
             printf("High Priority Send Error to 2nd client, errno=%d\n", errno);

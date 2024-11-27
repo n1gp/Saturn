@@ -137,7 +137,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
         if(size < 0 && errno != EAGAIN)
         {
             perror("recvfrom fail, TX I/Q data");
-            return NULL;
+            return EXIT_FAILURE;
         }
         if(size == VDUCIQSIZE)
         {
@@ -163,16 +163,25 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
             Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);           // read the FIFO free locations
             if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
                 printf("TX DUC FIFO Overthreshold, depth now = %d\n", Current);
-            if((StartupCount == 0) && FIFOUnderflow && UseDebug)
-                printf("TX DUC FIFO Underflowed, depth now = %d\n", Current);
+            if((StartupCount == 0) && FIFOUnderflow)
+            {
+                GlobalFIFOOverflows |= 0b00000100;
+                if(UseDebug)
+                    printf("TX DUC FIFO Underflowed, depth now = %d\n", Current);
+            }
+
             while (Depth < VMEMWORDSPERFRAME)       // loop till space available
             {
                 usleep(500);								                    // 0.5ms wait
                 Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);       // read the FIFO free locations
                 if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
                     printf("TX DUC FIFO Overthreshold, depth now = %d\n", Current);
-                if((StartupCount == 0) && FIFOUnderflow && UseDebug)
-                    printf("TX DUC FIFO Underflowed, depth now = %d\n", Current);
+                if((StartupCount == 0) && FIFOUnderflow)
+                {
+                    GlobalFIFOOverflows |= 0b00000100;
+                    if(UseDebug)
+                        printf("TX DUC FIFO Underflowed, depth now = %d\n", Current);
+                }
             }
             // copy data from UDP Buffer & DMA write it
 //            memcpy(IQBasePtr, UDPInBuffer + 4, VDMATRANSFERSIZE);                // copy out I/Q samples
