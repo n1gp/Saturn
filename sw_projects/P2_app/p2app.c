@@ -34,6 +34,8 @@
 #include <net/if.h>
 #include <semaphore.h>
 #include<signal.h>
+#include <ifaddrs.h>
+#include <netdb.h>
 
 #include "../common/saturntypes.h"
 #include "../common/hwaccess.h"                     // access to PCIe read & write
@@ -57,7 +59,7 @@
 #include "LDGATU.h"
 #include "frontpanelhandler.h"
 
-#define P2APPVERSION 31
+#define P2APPVERSION 32
 #define FWREQUIREDMAJORVERSION 1                  // major version that is required. Only altered if programming interface changes. 
 //
 // the Firmware version is a protection to make sure that if a p2app update is required by the new firmware,
@@ -65,6 +67,7 @@
 //
 //------------------------------------------------------------------------------------------
 // VERSION History
+// V32: 30/12/2024:  added support for Arduino G2V1 front panel adapter, for processor upgrades. 
 // V31: 21/11/2024:  added CW keyer keydown bit to high priority status byte 4 bit 7 for Thetis generated sidetone
 // V30: 17/11/2024:  wideband record added.
 // V29: 15/10/2024   DL1YCF CW ramp; CW amplitude corrected; added support to detect & check FPGA major version
@@ -124,6 +127,7 @@ bool ThreadError = false;                   // true if a thread reports an error
 bool UseDebug = false;                      // true if to enable debugging
 bool UseControlPanel = false;               // true if to use a control panel
 bool UseLDGATU = false;                     // true if to use an LDG ATU via CAT
+bool UseAriesATU = false;                   // true if to use an Aries ATU
 
 uint32_t SDRIP = 0;
 uint32_t SDRIP2 = 0;
@@ -386,6 +390,8 @@ void Shutdown()
   ShutdownCATHandler();                                   // close CAT connection socket
   if(UseControlPanel)
     ShutdownFrontPanelHandler();
+  if(UseAriesATU)
+    ShutdownAriesHandler();
   close(SocketData[0].Socketid);                          // close incoming data socket
   sem_destroy(&DDCInSelMutex);
   sem_destroy(&DDCResetFIFOMutex);
@@ -445,6 +451,10 @@ int main(int argc, char *argv[])
   unsigned int Version = 0;
   unsigned int MajorVersion = 0;
   bool IncompatibleFirmware = false;                                // becomes set if firmware is not compatible with this version
+  struct ifaddrs *ifaddr;                                           // used to find ethernet device name
+  int family, s;                                                    // used to find ethernet device name
+  char host[NI_MAXHOST];                                            // used to find ethernet device name
+  char if_string[NI_MAXHOST];                                       // used to find ethernet device name
 
   //
   // initialise register access semaphores
@@ -532,6 +542,7 @@ int main(int argc, char *argv[])
         printf("usage: ./p2app <optional arguments>\n");
         printf("optional arguments:\n");
         printf("-a LDG        control TUNE for LDG ATU\n");
+        printf("-a Aries      control TUNE for Aries ATU\n");
         printf("-f <frequency in Hz> turns on test source for all DDCs\n");
         printf("-i saturn     board responds as board id = Saturn\n");
         printf("-i orionmk2   board responds as board id = Orion mk 2\n");
@@ -549,10 +560,16 @@ int main(int argc, char *argv[])
           printf("TUNE command for LDG ATU via CAT\n");
           UseLDGATU = true;
         }
+        else if(strcmp(optarg,"Aries") == 0)
+        {
+          printf("Interface for Aries ATU vRequested\n");
+          UseAriesATU = true;
+        }
         else
         {
           printf("error parsing ATU type. Command is case sensitive\n");
           printf("-a LDG    selects LDG ATU\n");
+          printf("-a Aries      control TUNE for Aries ATU\n");
           return EXIT_SUCCESS;
         }
         break;
@@ -628,6 +645,12 @@ int main(int argc, char *argv[])
     InitialiseLDGHandler();
 
 //
+// startup ATU handler if needed
+//
+  if(UseAriesATU)
+    InitialiseAriesHandler();
+
+//
 // startup G2 front panel handler if needed
 //
   if(UseControlPanel)
@@ -653,8 +676,51 @@ int main(int argc, char *argv[])
   //
   // get this device MAC address
   //
+  //memset(&hwaddr, 0, sizeof(hwaddr));
+  //strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
+  //ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
+  //for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
+  //
+  // get IP and interface name, we use the 1st one found
+  // on Saturn this should be OK unless someone adds
+  // another ethernet adapter
+  //
+  if (getifaddrs(&ifaddr) == -1) 
+  {
+      perror("getifaddrs");
+      return(EXIT_FAILURE);
+  }
+
+  for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) 
+  {
+      if (ifa->ifa_addr == NULL)
+          continue;
+
+      family = ifa->ifa_addr->sa_family;
+
+      /* ignore AF_INET6 and lo */
+      if (family == AF_INET && !strstr("lo", ifa->ifa_name)) {
+          s = getnameinfo(ifa->ifa_addr,
+                  (family == AF_INET) ? sizeof(struct sockaddr_in) :
+                                        sizeof(struct sockaddr_in6),
+                  host, NI_MAXHOST,
+                  NULL, 0, NI_NUMERICHOST);
+          if (s != 0) {
+              printf("getnameinfo() failed: %s\n", gai_strerror(s));
+              return(EXIT_FAILURE);
+          }
+
+          printf("\tname: %s\taddress: <%s>\n", ifa->ifa_name, host);
+          strncpy(if_string, ifa->ifa_name, IFNAMSIZ - 1);
+      }
+  }
+  freeifaddrs(ifaddr);
+
+  //
+  // get this device MAC address
+  //
   memset(&hwaddr, 0, sizeof(hwaddr));
-  strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
+  strncpy(hwaddr.ifr_name, if_string, IFNAMSIZ - 1);
   ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
   for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
 
@@ -865,7 +931,7 @@ int main(int argc, char *argv[])
         case 2:
           printf("P2 Discovery packet\n");
           CurrentSDRIP = *(uint32_t *)&addr_from.sin_addr.s_addr;
-          if(SDRActive && SDRActive2)
+          if((SDRActive && SDRActive2) || IncompatibleFirmware)
             DiscoveryReply[4] = 3;                             // response 2 if not active, 3 if running
           else
             DiscoveryReply[4] = 2;
