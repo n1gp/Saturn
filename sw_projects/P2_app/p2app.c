@@ -36,6 +36,8 @@
 #include<signal.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 #include "../common/saturntypes.h"
 #include "../common/hwaccess.h"                     // access to PCIe read & write
@@ -57,9 +59,10 @@
 #include "Outwideband.h"
 #include "cathandler.h"
 #include "LDGATU.h"
+#include "AriesATU.h"
 #include "frontpanelhandler.h"
 
-#define P2APPVERSION 32
+#define P2APPVERSION 35
 #define FWREQUIREDMAJORVERSION 1                  // major version that is required. Only altered if programming interface changes. 
 //
 // the Firmware version is a protection to make sure that if a p2app update is required by the new firmware,
@@ -67,6 +70,9 @@
 //
 //------------------------------------------------------------------------------------------
 // VERSION History
+// V35: 1/2/2025:    removed warnings; no functional change
+// V34: 21/01/2025:  changed code to find ethernet device name, not fixed eth0
+// V33: 16/01/2025:  fix for OC outputs in wrong bit positions. CAT serial reliability fixed for front panel.
 // V32: 30/12/2024:  added support for Arduino G2V1 front panel adapter, for processor upgrades. 
 // V31: 21/11/2024:  added CW keyer keydown bit to high priority status byte 4 bit 7 for Thetis generated sidetone
 // V30: 17/11/2024:  wideband record added.
@@ -306,10 +312,9 @@ int MakeSocket(struct ThreadSocketData* Ptr, int DDCid)
 // this runs as its own thread to monitor command line activity. A string "exist" exits the application. 
 // thread initiated at the start.
 //
-void* CheckForExitCommand(void *arg)
+void* CheckForExitCommand(__attribute__((unused)) void *arg)
 {
   char ch;
-  (void)arg; // squelch compiler warning
 
   printf("spinning up Check For Exit thread\n");
   
@@ -331,7 +336,7 @@ void* CheckForExitCommand(void *arg)
 // this runs as its own thread to see if messages have stopped being received.
 // if nomessages in a second, goes back to "inactive" state.
 //
-void* CheckForActivity(void *arg)
+void* CheckForActivity(__attribute__((unused)) void *arg)
 {
   bool PreviouslyActiveState;
   bool PreviouslyActiveState2;
@@ -345,6 +350,8 @@ void* CheckForActivity(void *arg)
     if (!NewMessageReceived && HW_Timer_Enable) // if no messages received,
     {
       SDRActive = false;                        // set back to inactive
+      IsTXMode = false;
+      SetMOX(false);
       SetTXEnable(false);
       EnableCW(false, false);
       ReplyAddressSet = false;
@@ -451,10 +458,6 @@ int main(int argc, char *argv[])
   unsigned int Version = 0;
   unsigned int MajorVersion = 0;
   bool IncompatibleFirmware = false;                                // becomes set if firmware is not compatible with this version
-  struct ifaddrs *ifaddr;                                           // used to find ethernet device name
-  int family, s;                                                    // used to find ethernet device name
-  char host[NI_MAXHOST];                                            // used to find ethernet device name
-  char if_string[NI_MAXHOST];                                       // used to find ethernet device name
 
   //
   // initialise register access semaphores
@@ -506,7 +509,7 @@ int main(int argc, char *argv[])
     printf("***************************************************************************\n");
     printf("Incompatible Saturn FPGA firmware v%d; major version%d\n",
              Version,  MajorVersion);
-    printf("This version of p2app requires major version = %d\n, FWREQUIREDMAJORVERSION");
+    printf("This version of p2app requires major version = %d\n", FWREQUIREDMAJORVERSION);
     printf("You must update your copy of p2app to use that firmware version - see User manual\n");
     printf("p2app will refuse a connection request until this is resolved!\n");
     printf("\n\n\n***************************************************************************\n");
@@ -675,54 +678,50 @@ int main(int argc, char *argv[])
 
   //
   // get this device MAC address
+  // original code joust picked up interface eth0, but that doesn't work with Radxa CM5
+  // revised code enumerated the interfaces, but had a startup race condition
   //
-  //memset(&hwaddr, 0, sizeof(hwaddr));
-  //strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
-  //ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
-  //for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
-  //
-  // get IP and interface name, we use the 1st one found
-  // on Saturn this should be OK unless someone adds
-  // another ethernet adapter
-  //
-  if (getifaddrs(&ifaddr) == -1) 
-  {
-      perror("getifaddrs");
-      return(EXIT_FAILURE);
-  }
 
-  for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) 
-  {
-      if (ifa->ifa_addr == NULL)
-          continue;
 
-      family = ifa->ifa_addr->sa_family;
-
-      /* ignore AF_INET6 and lo */
-      if (family == AF_INET && !strstr("lo", ifa->ifa_name)) {
-          s = getnameinfo(ifa->ifa_addr,
-                  (family == AF_INET) ? sizeof(struct sockaddr_in) :
-                                        sizeof(struct sockaddr_in6),
-                  host, NI_MAXHOST,
-                  NULL, 0, NI_NUMERICHOST);
-          if (s != 0) {
-              printf("getnameinfo() failed: %s\n", gai_strerror(s));
-              return(EXIT_FAILURE);
-          }
-
-          printf("\tname: %s\taddress: <%s>\n", ifa->ifa_name, host);
-          strncpy(if_string, ifa->ifa_name, IFNAMSIZ - 1);
-      }
-  }
-  freeifaddrs(ifaddr);
-
-  //
-  // get this device MAC address
-  //
+#if 0 // original p2app code
   memset(&hwaddr, 0, sizeof(hwaddr));
-  strncpy(hwaddr.ifr_name, if_string, IFNAMSIZ - 1);
+  strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
   ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
   for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
+
+#else // newer way
+  DIR *dp;
+  struct dirent *ep;   
+  char *posp;
+  int ch = 'e';                                    // start character ethernet
+
+    dp = opendir("/sys/class/net");
+    if (dp != NULL) 
+    {
+      while ((ep = readdir(dp)) != NULL)
+      {
+        if ( !strcmp(ep->d_name, ".") || !strcmp(ep->d_name, "..") )
+        { 
+          continue;
+      }
+        posp = strchr(ep->d_name, ch);
+        if ( posp == ep->d_name ) { 
+          printf("%s: interface name: %s\n", __FUNCTION__, ep->d_name);
+          break;
+  }
+      }
+      (void) closedir(dp);
+    }
+    else
+    {
+      printf("%s: Couldn't open the directory\n", __FUNCTION__);
+      return -1; 
+    }   
+  memset(&hwaddr, 0, sizeof(hwaddr));
+    strncpy(hwaddr.ifr_name, ep->d_name, IFNAMSIZ - 1); 
+  ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
+  for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
+#endif
 
   MakeSocket(SocketData+VPORTDDCSPECIFIC, 0);            // create and bind a socket
   if(pthread_create(&DDCSpecificThread, NULL, IncomingDDCSpecific, (void*)&SocketData[VPORTDDCSPECIFIC]) < 0)

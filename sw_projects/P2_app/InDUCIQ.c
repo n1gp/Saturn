@@ -76,7 +76,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
     uint8_t* DestPtr;                                       // pointer to DMA buffer data
     unsigned int Current;                                   // current occupied locations in FIFO
     unsigned int StartupCount;                              // used to delay reporting of under & overflows
-    bool PrevSDRActive;                                     // used to detect change of state
+    bool PrevSDRActive = false;                             // used to detect change of state
 
     ThreadData = (struct ThreadSocketData *)arg;
     ThreadData->Active = true;
@@ -137,7 +137,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
         if(size < 0 && errno != EAGAIN)
         {
             perror("recvfrom fail, TX I/Q data");
-            return EXIT_FAILURE;
+            return NULL;
         }
         if(size == VDUCIQSIZE)
         {
@@ -186,8 +186,8 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
             // copy data from UDP Buffer & DMA write it
 //            memcpy(IQBasePtr, UDPInBuffer + 4, VDMATRANSFERSIZE);                // copy out I/Q samples
             // need to swap I & Q samples on replay
-            SrcPtr = (uint16_t *) (UDPInBuffer + 4);
-            DestPtr = (uint16_t *) IQBasePtr;
+            SrcPtr = (uint8_t *) (UDPInBuffer + 4);
+            DestPtr = (uint8_t *) IQBasePtr;
             for (Cntr=0; Cntr < VIQSAMPLESPERFRAME; Cntr++)                     // samplecounter
             {
                 *DestPtr++ = *(SrcPtr+3);                           // get I sample (3 bytes)
@@ -217,7 +217,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
 // NOTE hardware does not properly support this yet!
 // TX FIFO must be empty. Stop multiplexer; set bit; restart
 // 
-void HandlerSetEERMode(bool EEREnabled)
+void HandlerSetEERMode(__attribute__((unused)) bool EEREnabled)
 {
 
 }

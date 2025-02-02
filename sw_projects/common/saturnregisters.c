@@ -287,7 +287,6 @@ uint32_t DDCRegisters[VNUMDDC] =
 
 
 
-
 //
 // InitialiseFIFOSizes(void)
 // initialise the FIFO size table, which is FPGA version dependent
@@ -598,6 +597,7 @@ void SetClassEPA(bool IsClassE)
 //
 // SetOpenCollectorOutputs(unsigned int bits)
 // sets the 7 open collector output bits
+// data must be provided in bits 6:0
 //
 void SetOpenCollectorOutputs(unsigned int bits)
 {
@@ -608,9 +608,9 @@ void SetOpenCollectorOutputs(unsigned int bits)
     Register = GPIORegValue;                        // get current settings
     BitMask = (0b1111111) << VOPENCOLLECTORBITS;
     Register = Register & ~BitMask;                 // strip old bits, add new
-    Register |= (bits << (VOPENCOLLECTORBITS-1));   // OC bits are in bits (7:1) not (6:0)
-    GPIORegValue = Register;                    // store it back
-    RegisterWrite(VADDRRFGPIOREG, Register);  // and write to it
+    Register |= (bits << VOPENCOLLECTORBITS);       // OC bits are in bits (6:0)
+    GPIORegValue = Register;                        // store it back
+    RegisterWrite(VADDRRFGPIOREG, Register);        // and write to it
     sem_post(&RFGPIOMutex);                         // clear protected access
 }
 
@@ -739,7 +739,7 @@ void SetDUCFrequency(unsigned int Value, bool IsDeltaPhase)		// only accepts DUC
 
     if(!IsDeltaPhase)                       // ieif protocol 1
     {
-        fDeltaPhase = (double)(2^32) * (double)Value / (double) VSAMPLERATE;
+        fDeltaPhase = VTWOEXP32 * (double)Value / (double) VSAMPLERATE;
         DeltaPhase = (uint32_t)fDeltaPhase;
     }
     else
@@ -1419,7 +1419,7 @@ void SetDDCADC(int DDC, EADCSelect ADC)
         ADC = eTestSource;                          // override setting
 
     ADCSetting = ((uint32_t)ADC & 0x3) << (DDC*2);  // 2 bits with ADC setting
-    Mask = 0x3 << (DDC*2);                          // 0,2,4,6,8,10,12,14,16,18bit positions
+    Mask = 0x3 << (DDC*2);                         // 0,2,4,6,8,10,12,14,16,18bit positions
 
     sem_wait(&DDCInSelMutex);                       // get protected access
     RegisterValue = DDCInSelReg;                    // get current register setting
@@ -1456,6 +1456,7 @@ void SetRXDDCEnabled(bool IsEnabled)
     sem_post(&DDCInSelMutex);
 }
 
+
 #define VMINCWRAMPDURATION 3000                     // 3ms min
 #define VMAXCWRAMPDURATION 10000                    // 10ms max
 #define VMAXCWRAMPDURATIONV14PLUS 20000             // 20ms max
@@ -1484,17 +1485,14 @@ void InitialiseCWKeyerRamp(bool Protocol2, uint32_t Length_us)
     const double sixpi = 18.84955592153880;
     const double eightpi = 25.13274122871830;
     const double tenpi = 31.41592653589790;
-    double LargestSample;
-    double Fraction;                         // fractional position in ramp
-    double SamplePeriod;                     // sample period in us
-    double Length;                           // length required in us
+
+    double SamplePeriod;                    // sample period in us
     uint32_t RampLength;                    // integer length in WORDS not bytes!
-    double RampSample[VRAMPSIZE];            // array samples
     uint32_t Cntr;
     uint32_t Sample;                        // ramp sample value
     uint32_t Register;
-    ESoftwareID ID;
-    unsigned int FPGAVersion = 0;
+	ESoftwareID ID;
+	unsigned int FPGAVersion = 0;
     unsigned int MaxDuration;               // max ramp duration in microseconds
     double x, x2, x4, x6, x8, x10, rampsample;
 
@@ -1516,17 +1514,18 @@ void InitialiseCWKeyerRamp(bool Protocol2, uint32_t Length_us)
         GCWKeyerRampms = Length_us;
         GCWKeyerRamp_IsP2 = Protocol2;
         printf("calculating new CW ramp, length = %d us\n", Length_us);
-        // work out required length in samples
+    // work out required length in samples
         if(Protocol2)
             SamplePeriod = 1000.0/192.0;
         else
             SamplePeriod = 1000.0/48.0;
         RampLength = (uint32_t)(((double)Length_us / SamplePeriod) + 1);
+
 //
 // DL1YCF ramp code:
 //
 //
-        for(Cntr=0; Cntr < RampLength; Cntr++)
+        for (Cntr = 0; Cntr < RampLength; Cntr++)
         {
             x = (double) Cntr / (double) RampLength;           // between 0 and 1
             x2 = x * twopi;         // 2 Pi x
@@ -1729,6 +1728,8 @@ void SetXvtrEnable(bool Enabled)
     sem_post(&RFGPIOMutex);                         // clear protected access
 }
 
+
+
 unsigned int GWidebandSampleCount;                  // P2 - not used yet
 unsigned int GWidebandUpdateRate;                   // update rate in ms. P2 - not used yet. 
 unsigned int GWidebandControl;                      // P2 - wideband control register
@@ -1755,6 +1756,7 @@ void SetWidebandEnable(bool ADC0, bool ADC1, bool DataCollected)
 }
 
 
+
 //
 // SetWidebandSampleCount(uint32_t SampleWords)
 // sets the wideband data collected count, in 64 bit words
@@ -1770,7 +1772,6 @@ void SetWidebandSampleCount(unsigned int Samples)
         RegisterWrite(VADDRWIDEBANDDEPTHREG, Register);   // and write to it
     }
 }
-
 
 
 
@@ -1790,6 +1791,8 @@ void SetWidebandUpdateRate(unsigned int Period_ms)
 }
 
 
+
+
 //
 // uint32_t GetWidebandStatus(bool *ADC0Data, bool *ADC1Data)
 // returns the number of 64 bit words in the Wideband data FIFO
@@ -1805,6 +1808,8 @@ uint32_t GetWidebandStatus(bool *ADC0Data, bool *ADC1Data)
     Depth = (Register & 0x3FFFFFFF);                        // strip top 2 bits to get FIFO depth
     return Depth;
 }
+
+
 
 
 //
@@ -2069,7 +2074,6 @@ unsigned int GetUserIOBits(void)
     Result = ((GStatusRegister >> VUSERIO4) & 0b1011);                       // get user input 4/5/-/8
     Result = Result ^ 0x8;                                                   // invert IO8 (should be active low)
     Result |= ((GStatusRegister >> 7) & 0b0100);                             // get ATU bit into IO6 location
-
     return Result;
 }
 
@@ -2296,7 +2300,7 @@ void SetTXModulationSource(ETXModulationSource Source)
 // SetDuplex(bool Enabled)
 // if Enabled, the RX signal is transferred back during TX; else TX drive signal
 //
-void SetDuplex(bool Enabled)
+void SetDuplex(__attribute__((unused)) bool Enabled)
 {
 
 }
@@ -2306,7 +2310,7 @@ void SetDuplex(bool Enabled)
 // SetOperateMode(bool IsRunMode)
 // enables or disables operation & data transfer.
 //
-void SetOperateMode(bool IsRunMode)
+void SetOperateMode(__attribute__((unused)) bool IsRunMode)
 {
 
 }
@@ -2316,7 +2320,7 @@ void SetOperateMode(bool IsRunMode)
 // SetFreqPhaseWord(bool IsPhase)
 // for protocol 2, sets whether DDC/DUC frequency is phase word or frequency in Hz.
 //
-void SetFreqPhaseWord(bool IsPhase)
+void SetFreqPhaseWord(__attribute__((unused)) bool IsPhase)
 {
     
 }
@@ -2326,7 +2330,7 @@ void SetFreqPhaseWord(bool IsPhase)
 // SetDDCSampleSize(unsigned int DDC, unsgned int Size)
 // set sample resolution for DDC (only 24 bits supported, so ignore)
 //
-void SetDDCSampleSize(unsigned int DDC, unsigned int Size)
+void SetDDCSampleSize(__attribute__((unused)) unsigned int DDC, __attribute__((unused)) unsigned int Size)
 {
 
 }

@@ -44,7 +44,7 @@ void SetAriesZZZSState(uint8_t ProductID, uint8_t HWVersion, uint8_t SWID);
 // see if serial device belongs to an Aries open serial port
 // return true if this handle belongs to Aries ATU
 //
-bool IsAriesSerial(uint32_t Handle);
+bool IsAriesSerial(int Handle);
 
 //
 // receive a ZZZP message from Aries
@@ -62,9 +62,14 @@ void HandleAriesZZOXMessage(bool Param);
 void HandleAriesZZOZMessage(bool Param);
 
 //
+// response from a ZZTU; tune state request
+//
+void SetAriesTuneState(bool Param);
+
+//
 // set TX frequency from SDR App
 //
-void SetAriesTXFrequency(uint32_t Newfreq);
+void SetAriesTXFrequency(uint32_t NewFreq);
 
 //
 // set Alex TX word from SDR App
@@ -81,5 +86,10 @@ void SetAriesAlexRXWord(uint16_t Word);
 // State = 0: released; 1: pressed; 2: long pressed
 //
 void HandleATUButtonPress(uint8_t Event);
+//
+// set ATU Enabled or Disabled
+// send message to ATU, and set LED appropriately
+//
+void SetAriesEnabledState(bool IsEnabled);
 
 #endif

@@ -43,7 +43,7 @@ char* DeviceNames[] =
 //
 // open and set up a serial port for read/write access
 //
-int OpenSerialPort(char* DeviceName)
+int OpenSerialPort(char* DeviceName, unsigned int Baud)
 {
     int Device;
     struct termios Ser;
@@ -58,8 +58,8 @@ int OpenSerialPort(char* DeviceName)
         memset(&Ser, 0, sizeof(Ser));
         Ser.c_iflag = IGNBRK | IGNPAR;
         Ser.c_cflag = CS8 | CREAD | HUPCL | CLOCAL;
-        cfsetospeed(&Ser, B9600);
-        cfsetispeed(&Ser, B9600);
+        cfsetospeed(&Ser, Baud);
+        cfsetispeed(&Ser, Baud);
         Ser.c_cc[VTIME] = 5;                // 0.5s timeout on read
         Ser.c_cc[VMIN] = 0;                 // read can return wioth no characters
 
@@ -94,7 +94,7 @@ void SendStringToSerial(int Device, char* Message)
 // serial read thread
 // the paramter passed is a pointer to a struct with the required settings
 //
-void CATSerial(void *arg)
+void* CATSerial(void *arg)
 {
     char SerialInputBuffer[VESERINSIZE];
     char CATMessageBuffer[VESERINSIZE];
@@ -104,10 +104,11 @@ void CATSerial(void *arg)
     char ch;                                    // individual read character
     int MatchPositionZZZS;
     int MatchPositionZZZP;
+
     TSerialThreadData *DeviceData;
 
     DeviceData = (TSerialThreadData *) arg;
-    DeviceData -> DeviceHandle = OpenSerialPort(DeviceData -> PathName);
+    DeviceData -> DeviceHandle = OpenSerialPort(DeviceData -> PathName, DeviceData -> Baud);
     if(DeviceData -> DeviceHandle != -1)
     {
         printf("Setting up CAT Serial read handler thread for device %s\n", DeviceNames[(int)DeviceData->Device]);
@@ -167,4 +168,5 @@ void CATSerial(void *arg)
         close(DeviceData -> DeviceHandle);
         DeviceData -> IsOpen = false;
     }
+    return NULL;
 }

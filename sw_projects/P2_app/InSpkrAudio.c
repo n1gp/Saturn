@@ -71,7 +71,7 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
     uint32_t RegVal;
     unsigned int Current;                                   // current occupied locations in FIFO
     unsigned int StartupCount;                              // used to delay reporting of under & overflows
-    bool PrevSDRActive;                                     // used to detect change of state
+    bool PrevSDRActive = false;                             // used to detect change of state
 
 
     ThreadData = (struct ThreadSocketData *)arg;
@@ -132,7 +132,7 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
         if(size < 0 && errno != EAGAIN)
         {
             perror("recvfrom fail, Speaker data");
-            return EXIT_FAILURE;
+            return NULL;
         }
         if(size == VSPEAKERAUDIOSIZE)                           // we have received a packet!
         {
