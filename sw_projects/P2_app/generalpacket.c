@@ -17,7 +17,6 @@
 #include "threaddata.h"
 #include <stddef.h>
 #include <stdio.h>
-#include <sys/socket.h>
 #include "generalpacket.h"
 #include "../common/saturnregisters.h"
 #include "Outwideband.h"
@@ -30,6 +29,7 @@ uint16_t WidebandSampleCount;
 uint8_t WidebandSampleSize;
 uint8_t WidebandUpdateRate;
 uint8_t WidebandPacketsPerFrame;
+
 
 //
 // protocol 2 handler for General Packet to SDR

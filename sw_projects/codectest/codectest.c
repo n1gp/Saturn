@@ -253,7 +253,6 @@ int main(int argc, char *argv[])
 	bool MicRing = false;
 	bool EnableBias =false;
 	bool EnableBoost =false;
-	bool PTTState = false;
 	bool IsXLR = false;
 	int32_t Cntr;
 	float PercentLevel;
@@ -311,7 +310,7 @@ int main(int argc, char *argv[])
   		sem_init(&RFGPIOMutex, 0, 1);                                     // for RF GPIO register
   		sem_init(&CodecRegMutex, 0, 1);                                   // for codec writes
 
-		OpenXDMADriver();
+		OpenXDMADriver(false);
 		PrintVersionInfo();
 		CodecInitialise();
 		SetByteSwapping(false);                                            // h/w to generate normalbyte order
@@ -330,14 +329,14 @@ int main(int argc, char *argv[])
 			goto out;
 		}
 
-		DMAWritefile_fd = open("/dev/xdma0_h2c_0", O_RDWR);
+		DMAWritefile_fd = open("/dev/xdma0_h2c_0", O_WRONLY);
 		if(DMAWritefile_fd < 0)
 		{
 			printf("XDMA write device open failed\n");
 			goto out;
 		}
 
-		DMAReadfile_fd = open("/dev/xdma0_c2h_0", O_RDWR);
+		DMAReadfile_fd = open("/dev/xdma0_c2h_0", O_RDONLY);
 		if(DMAReadfile_fd < 0)
 		{
 			printf("XDMA read device open failed\n");

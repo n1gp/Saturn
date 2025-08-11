@@ -1,0 +1,1310 @@
+diff --git a/sw_projects/P2_app/AriesATU.c b/sw_projects/P2_app/AriesATU.c
+index 9263e77..bebd90e 100644
+--- a/sw_projects/P2_app/AriesATU.c
++++ b/sw_projects/P2_app/AriesATU.c
+@@ -29,6 +29,7 @@
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ #include <pthread.h>
++#include <syscall.h>
+ 
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+@@ -93,7 +94,7 @@ void* AriesTick(__attribute__((unused)) void *arg)
+     bool PreviousTXMode = false;                                    // for detecting TX state change
+     bool PreviousSDRActive = false;                                 // for detecting SDR active state change
+ 
+-    printf("opened Aries periodic tick thread\n");
++    printf("opened Aries periodic tick thread, pid=%ld\n", syscall(SYS_gettid));
+     while(AriesATUActive)
+     {
+         //
+diff --git a/sw_projects/P2_app/InDUCIQ.c b/sw_projects/P2_app/InDUCIQ.c
+index 6e7f7b9..4a16678 100644
+--- a/sw_projects/P2_app/InDUCIQ.c
++++ b/sw_projects/P2_app/InDUCIQ.c
+@@ -27,6 +27,9 @@
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+ #include "../common/hwaccess.h"
++#include <pthread.h>
++#include <syscall.h>
++
+ 
+ 
+ 
+@@ -40,7 +43,6 @@
+ #define VSTARTUPDELAY 100                           // 100 messages (~100ms) before reporting under or overflows
+ 
+ int TXActive = 0;   // The client actively transmitting, 0-none, 1-xdma, 2-network
+-
+ //
+ // listener thread for incoming DUC I/Q packets
+ // planned strategy: just DMA spkr data when available; don't copy and DMA a larger amount.
+@@ -64,9 +66,6 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
+ //
+     uint8_t* IQWriteBuffer = NULL;							// data for DMA to write to DUC
+     uint32_t IQBufferSize = VDMABUFFERSIZE;
+-    bool InitError = false;                                 // becomes true if we get an initialisation error
+-    unsigned char* IQReadPtr;								// pointer for reading out an I/Q sample
+-    unsigned char* IQHeadPtr;								// ptr to 1st free location in I/Q memory
+     unsigned char* IQBasePtr;								// ptr to DMA location in I/Q memory
+     uint32_t Depth = 0;
+     int DMAWritefile_fd = -1;								// DMA read file device
+@@ -80,31 +79,24 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
+ 
+     ThreadData = (struct ThreadSocketData *)arg;
+     ThreadData->Active = true;
+-    printf("spinning up DUC I/Q thread with port %d\n", ThreadData->Portid);
++    printf("spinning up DUC I/Q thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+   
+     //
+     // setup DMA buffer
+     //
+     posix_memalign((void**)&IQWriteBuffer, VALIGNMENT, IQBufferSize);
+     if (!IQWriteBuffer)
+-    {
+         printf("I/Q TX write buffer allocation failed\n");
+-        InitError = true;
+-    }
+-    IQReadPtr = IQWriteBuffer + VBASE;							// offset 4096 bytes into buffer
+-    IQHeadPtr = IQWriteBuffer + VBASE;
+     IQBasePtr = IQWriteBuffer + VBASE;
+     memset(IQWriteBuffer, 0, IQBufferSize);
+ 
+     //
+     // open DMA device driver
++    // opened write only to accommodate potential use of a different XDMA device driver
+     //
+-    DMAWritefile_fd = open(VDUCDMADEVICE, O_RDWR);
++    DMAWritefile_fd = open(VDUCDMADEVICE, O_WRONLY);
+     if (DMAWritefile_fd < 0)
+-    {
+         printf("XDMA write device open failed for TX I/Q data\n");
+-        InitError = true;
+-    }
+         
+ //
+ // setup hardware
+@@ -163,6 +155,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
+             Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);           // read the FIFO free locations
+             if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
+                 printf("TX DUC FIFO Overthreshold, depth now = %d\n", Current);
++
+             if((StartupCount == 0) && FIFOUnderflow)
+             {
+                 GlobalFIFOOverflows |= 0b00000100;
+@@ -219,5 +212,4 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
+ // 
+ void HandlerSetEERMode(__attribute__((unused)) bool EEREnabled)
+ {
+-
+ }
+diff --git a/sw_projects/P2_app/InHighPriority.c b/sw_projects/P2_app/InHighPriority.c
+index a8d8cc3..28c5780 100644
+--- a/sw_projects/P2_app/InHighPriority.c
++++ b/sw_projects/P2_app/InHighPriority.c
+@@ -28,6 +28,9 @@
+ #include "../common/version.h"
+ #include "cathandler.h"
+ #include "AriesATU.h"
++#include <pthread.h>
++#include <syscall.h>
++
+ 
+ extern bool AriesATUActive;                             // true if Aries is operating
+ 
+@@ -58,7 +61,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+ 
+   ThreadData = (struct ThreadSocketData *)arg;
+   ThreadData->Active = true;
+-  printf("spinning up high priority incoming thread with port %d\n", ThreadData->Portid);
++  printf("spinning up high priority incoming thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+   FPGAVersion = GetFirmwareVersion(&FPGASWID);          // get version of FPGA code
+ 
+   //
+@@ -81,6 +84,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+       printf("error number = %d\n", errno);
+       EXIT_FAILURE;
+     }
++
+     //
+     // if correct packet, process it
+     //
+@@ -151,8 +155,8 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+         {
+           SDRActive = false;                                       // set state of whole app
+           SetTXEnable(false);
+-        IsTXMode = false;
+-        SetMOX(false);
++          IsTXMode = false;
++          SetMOX(false);
+           EnableCW(false, false);
+           StartBitReceived = false;
+           ReplyAddressSet = false;
+@@ -174,12 +178,17 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+       SetAriesTXFrequency(LongWord);
+       Byte = (uint8_t)(UDPInBuffer[345]);
+       SetTXDriveLevel(Byte);
++
+       //
+-      // CAT port (if set)
++      // create CAT port (if set)
++      // shut down CAT port if not set and the CAT thread is active
+       //
+       Word = ntohs(*(uint16_t *)(UDPInBuffer+1398));
+       if(Word != 0)
+         SetupCATPort(Word);
++      else if (Word == 0 && CATPortAssigned)
++        ShutdownCATHandler();
++
+       //
+       // transverter, speaker mute, open collector, user outputs
+       // open collector data is in bits 7:1; move to 6:0
+@@ -191,6 +200,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+       SetOpenCollectorOutputs(Byte >> 1);
+       Byte = (uint8_t)(UDPInBuffer[1402]);
+       SetUserOutputBits(Byte);
++
+       //
+       // Alex
+       // behaviour needs to be FPGA version specific: at V12, separate register added for Alex TX antennas
+@@ -248,9 +258,6 @@ void *IncomingHighPriority(void *arg)                   // listener thread
+       Byte = (uint8_t)(UDPInBuffer[1443]);      // RX1 atten
+       SetADCAttenuator(eADC1, Byte, true, false);
+       SetADCAttenuator(eADC2, Byte2, true, false);
+-
+-      SetMOX(IsTXMode);
+-
+       //
+       // CWX bits
+       //
+diff --git a/sw_projects/P2_app/InSpkrAudio.c b/sw_projects/P2_app/InSpkrAudio.c
+index f69a022..c4f3cea 100644
+--- a/sw_projects/P2_app/InSpkrAudio.c
++++ b/sw_projects/P2_app/InSpkrAudio.c
+@@ -24,6 +24,8 @@
+ #include <unistd.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <pthread.h>
++#include <syscall.h>
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+ #include "../common/hwaccess.h"
+@@ -61,9 +63,6 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
+ //
+     uint8_t* SpkWriteBuffer = NULL;							// data for DMA to write to spkr
+     uint32_t SpkBufferSize = VDMABUFFERSIZE;
+-    bool InitError = false;                                 // becomes true if we get an initialisation error
+-    unsigned char* SpkReadPtr;								// pointer for reading out a spkr sample
+-    unsigned char* SpkHeadPtr;								// ptr to 1st free location in spk memory
+     unsigned char* SpkBasePtr;								// ptr to DMA location in spk memory
+     uint32_t Depth = 0;
+     int DMAWritefile_fd = -1;								// DMA read file device
+@@ -76,32 +75,25 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
+ 
+     ThreadData = (struct ThreadSocketData *)arg;
+     ThreadData->Active = true;
+-    printf("spinning up speaker audio thread with port %d\n", ThreadData->Portid);
++    printf("spinning up speaker audio thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+ 
+     //
+     // setup DMA buffer
+     //
+     posix_memalign((void**)&SpkWriteBuffer, VALIGNMENT, SpkBufferSize);
+     if (!SpkWriteBuffer)
+-    {
+         printf("spkr write buffer allocation failed\n");
+-        InitError = true;
+-    }
+-    SpkReadPtr = SpkWriteBuffer + VBASE;							// offset 4096 bytes into buffer
+-    SpkHeadPtr = SpkWriteBuffer + VBASE;
+     SpkBasePtr = SpkWriteBuffer + VBASE;
+     memset(SpkWriteBuffer, 0, SpkBufferSize);
+ 
+     //
+     // open DMA device driver
++    // opened write only to accommodate potential use of a different XDMA device driver
+     //
+-    DMAWritefile_fd = open(VSPKDMADEVICE, O_RDWR);
++    DMAWritefile_fd = open(VSPKDMADEVICE, O_WRONLY);
+     if (DMAWritefile_fd < 0)
+-    {
+         printf("XDMA write device open failed for spk data\n");
+-        InitError = true;
+-    }
+-	ResetDMAStreamFIFO(eSpkCodecDMA);
++    ResetDMAStreamFIFO(eSpkCodecDMA);
+     SetupFIFOMonitorChannel(eSpkCodecDMA, false);
+ 
+   //
+@@ -136,13 +128,13 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
+         }
+         if(size == VSPEAKERAUDIOSIZE)                           // we have received a packet!
+         {
+-            if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
++            if(SDRIP2 == 0 && *(int *)&addr_from.sin_addr.s_addr != SDRIP)
+               continue; // stray msg from inactive client
+ 
+             if(StartupCount != 0)                                   // decrement startup message count
+                 StartupCount--;
+ 
+-            Client2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
++            Client2 = (*(int *)&addr_from.sin_addr.s_addr == SDRIP2);
+             if (Client2)
+             {
+               NewMessageReceived2 = true;
+@@ -150,6 +142,7 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
+             }
+             else
+               NewMessageReceived = true;
++
+             RegVal += 1;            //debug
+             Depth = ReadFIFOMonitorChannel(eSpkCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);        // read the FIFO free locations
+             if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
+diff --git a/sw_projects/P2_app/IncomingDDCSpecific.c b/sw_projects/P2_app/IncomingDDCSpecific.c
+index 54aa4e3..513d0ec 100644
+--- a/sw_projects/P2_app/IncomingDDCSpecific.c
++++ b/sw_projects/P2_app/IncomingDDCSpecific.c
+@@ -26,6 +26,8 @@
+ #include <string.h>
+ #include "../common/saturnregisters.h"
+ #include "OutDDCIQ.h"
++#include <pthread.h>
++#include <syscall.h>
+ 
+ 
+ 
+@@ -53,7 +55,7 @@ void *IncomingDDCSpecific(void *arg)                    // listener thread
+ 
+   ThreadData = (struct ThreadSocketData *)arg;
+   ThreadData->Active = true;
+-  printf("spinning up DDC specific thread with port %d\n", ThreadData->Portid);
++  printf("spinning up DDC specific thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+   //
+   // main processing loop
+   //
+diff --git a/sw_projects/P2_app/IncomingDUCSpecific.c b/sw_projects/P2_app/IncomingDUCSpecific.c
+index 2a85d92..bf03f69 100644
+--- a/sw_projects/P2_app/IncomingDUCSpecific.c
++++ b/sw_projects/P2_app/IncomingDUCSpecific.c
+@@ -26,6 +26,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include "../common/saturnregisters.h"
++#include <pthread.h>
++#include <syscall.h>
+ 
+ 
+ 
+@@ -55,7 +57,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
+ 
+     ThreadData = (struct ThreadSocketData *)arg;
+     ThreadData->Active = true;
+-    printf("spinning up DUC specific thread with port %d\n", ThreadData->Portid);
++    printf("spinning up DUC specific thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+     //
+     // main processing loop
+     //
+@@ -93,7 +95,6 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
+             if(TXActive == 2) continue;
+           }
+ 
+-          //printf("DUC packet received\n");
+ // iambic settings
+           IambicSpeed = *(uint8_t*)(UDPInBuffer+9);               // keyer speed
+           IambicWeight = *(uint8_t*)(UDPInBuffer+10);             // keyer weight
+@@ -119,6 +120,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
+               CWRampTime_us = 1000 * CWRampTime;
+               InitialiseCWKeyerRamp(true, CWRampTime_us);         // create required ramp, P2
+           }
++
+ // mic and line in options
+           Byte = *(uint8_t*)(UDPInBuffer+50);                     // mic/line options
+           SetMicBoost((bool)((Byte >> 1)&1));
+diff --git a/sw_projects/P2_app/Makefile b/sw_projects/P2_app/Makefile
+index b268eff..0d8140f 100644
+--- a/sw_projects/P2_app/Makefile
++++ b/sw_projects/P2_app/Makefile
+@@ -10,16 +10,23 @@ LIBS = -lgpiod -li2c
+ TARGET = p2app
+ VPATH=.:../common
+ GIT_DATE := $(wordlist 2,5, $(shell git log -1 --format=%cd --date=rfc))
++
++SRCS = $(TARGET).c hwaccess.c saturnregisters.c codecwrite.c saturndrivers.c version.c generalpacket.c IncomingDDCSpecific.c  IncomingDUCSpecific.c InHighPriority.c InDUCIQ.c InSpkrAudio.c OutMicAudio.c OutDDCIQ.c OutHighPriority.c debugaids.c auxadc.c cathandler.c frontpanelhandler.c catmessages.c g2panel.c LDGATU.c g2v2panel.c i2cdriver.c andromedacatmessages.c Outwideband.c serialport.c AriesATU.c
++OBJS = $(SRCS:.c=.o)
++
++# for cppcheck
++CPP_OPTIONS= --inline-suppr --enable=all --suppress=unmatchedSuppression
++CPP_OPTIONS += -D__linux__ --suppress=missingIncludeSystem --suppress=unusedFunction
+  
+ # ****************************************************
+ # Targets needed to bring the executable up to date
+ 
+-OBJS=    $(TARGET).o hwaccess.o saturnregisters.o codecwrite.o saturndrivers.o version.o generalpacket.o IncomingDDCSpecific.o  IncomingDUCSpecific.o InHighPriority.o InDUCIQ.o InSpkrAudio.o OutMicAudio.o OutDDCIQ.o OutHighPriority.o debugaids.o auxadc.o cathandler.o frontpanelhandler.o catmessages.o g2panel.o LDGATU.o g2v2panel.o i2cdriver.o andromedacatmessages.o Outwideband.o serialport.o AriesATU.o
+-
+ all: $(OBJS)
+ 	$(LD) -o $(TARGET) $(OBJS) $(LDFLAGS) $(LIBS)
+  
+- 
++cppcheck:
++	cppcheck $(CPP_OPTIONS) $(SRCS)
++
+ %.o: %.c
+ 	$(CC) -c -o $(@F) $(CFLAGS) -D GIT_DATE='"$(GIT_DATE)"' $<
+ 
+diff --git a/sw_projects/P2_app/OutDDCIQ.c b/sw_projects/P2_app/OutDDCIQ.c
+index 02d9d79..c45b141 100644
+--- a/sw_projects/P2_app/OutDDCIQ.c
++++ b/sw_projects/P2_app/OutDDCIQ.c
+@@ -24,6 +24,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <fcntl.h>
++#include <pthread.h>
++#include <syscall.h>
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+ #include "../common/hwaccess.h"
+@@ -303,8 +305,9 @@ void *OutgoingDDCIQ(void *arg)
+     InitError = CreateDynamicMemory();
+     //
+     // open DMA device driver
++    // opened readonly to accommodate potential use of a different XDMA device driver
+     //
+-    IQReadfile_fd = open(VDDCDMADEVICE, O_RDWR);
++    IQReadfile_fd = open(VDDCDMADEVICE, O_RDONLY);
+     if (IQReadfile_fd < 0)
+     {
+         printf("XDMA read device open failed for DDC data\n");
+@@ -312,7 +315,7 @@ void *OutgoingDDCIQ(void *arg)
+     }
+ 
+     ThreadData = (struct ThreadSocketData*)arg;
+-    printf("spinning up outgoing I/Q thread with port %d\n", ThreadData->Portid);
++    printf("spinning up outgoing I/Q thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+ 
+     //
+     // set up per-DDC data structures
+@@ -337,9 +340,9 @@ void *OutgoingDDCIQ(void *arg)
+     SetupFIFOMonitorChannel(eRXDDCDMA, false);
+     ResetDMAStreamFIFO(eRXDDCDMA);
+     RegisterValue = ReadFIFOMonitorChannel(eRXDDCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);				// read the FIFO Depth register
+-    if(UseDebug)
+-      printf("DDC FIFO Depth register = %08x (should be ~0)\n", RegisterValue);
+-    Depth=0;
++	if(UseDebug)
++        printf("DDC FIFO Depth register = %08x (should be ~0)\n", RegisterValue);
++	Depth=0;
+ 
+ 
+ //
+@@ -369,6 +372,7 @@ void *OutgoingDDCIQ(void *arg)
+         for (DDC = 0; DDC < VNUMDDC; DDC++)
+         {
+             SequenceCounter[DDC] = 0;
++            memcpy(&DestAddr[DDC], &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address (reply_addr is global)
+             memset(&iovecinst[DDC], 0, sizeof(struct iovec));
+             memset(&datagram[DDC], 0, sizeof(struct msghdr));
+             iovecinst[DDC].iov_base = UDPBuffer[DDC];
+@@ -399,7 +403,7 @@ void *OutgoingDDCIQ(void *arg)
+ 
+                 while ((IQHeadPtr[DDC] - IQReadPtr[DDC]) > VIQBYTESPERFRAME)
+                 {
+-                    //printf("enough data for packet: DDC=%d\n", DDC);
++//                    printf("enough data for packet: DDC= %d\n", DDC);
+                     *(uint32_t*)UDPBuffer[DDC] = htonl(SequenceCounter[DDC]++);     // add sequence count
+                     memset(UDPBuffer[DDC] + 4, 0, 8);                               // clear the timestamp data
+                     *(uint16_t*)(UDPBuffer[DDC] + 12) = htons(24);                  // bits per sample
+@@ -457,6 +461,7 @@ void *OutgoingDDCIQ(void *arg)
+             // the latter approach seems easier!
+             //
+             Depth = ReadFIFOMonitorChannel(eRXDDCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);				// read the FIFO Depth register
++
+             if((StartupCount == 0) && FIFOOverThreshold)
+             {
+                 GlobalFIFOOverflows |= 0b00000001;
+diff --git a/sw_projects/P2_app/OutHighPriority.c b/sw_projects/P2_app/OutHighPriority.c
+index fcd1f37..3d1ac58 100644
+--- a/sw_projects/P2_app/OutHighPriority.c
++++ b/sw_projects/P2_app/OutHighPriority.c
+@@ -24,6 +24,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <fcntl.h>
++#include <pthread.h>
++#include <syscall.h>
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+ #include "LDGATU.h"
+@@ -32,6 +34,7 @@
+ uint8_t GlobalFIFOOverflows = 0;             // FIFO overflow words
+ 
+ 
++
+ // this runs as its own thread to send outgoing data
+ // thread initiated after a "Start" command
+ // will be instructed to stop & exit by main loop setting enable_thread to 0
+@@ -58,13 +61,14 @@ void *OutgoingHighPriority(void *arg)
+   bool ATUTuneRequest = false;
+   bool FIFOOverflow, FIFOUnderflow, FIFOOverThreshold;      // FIFO flags
+   uint8_t FIFOOverflows;
++  uint8_t ADCOverflows = 0;                       // set non zero if ADC overflows detected
+ 
+ //
+ // initialise. Create memory buffers and open DMA file devices
+ //
+   ThreadData = (struct ThreadSocketData *)arg;
+   ThreadData->Active = true;
+-  printf("spinning up outgoing high priority with port %d\n", ThreadData->Portid);
++  printf("spinning up outgoing high priority with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+ 
+ //
+ // OK, now the main work
+@@ -115,12 +119,13 @@ void *OutgoingHighPriority(void *arg)
+       uint16_t SleepCount;                                      // counter for sending next message
+       uint8_t PTTBits;                                          // PTT bits - and change means a new message needed
+       // create the packet
+-      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
++      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));   // (RRK not sure this is needed as it is already above) local copy of PC destination address
+       ReadStatusRegister();
+       PTTBits = (uint8_t)GetP2PTTKeyInputs();
+       *(uint8_t *)(UDPBuffer+4) = PTTBits;
+-      Byte = (uint8_t)GetADCOverflow();
+-      *(uint8_t *)(UDPBuffer+5) = Byte;
++      ADCOverflows |= (uint8_t)GetADCOverflow();                // add in any new overflows
++      *(uint8_t *)(UDPBuffer+5) = ADCOverflows;
++      ADCOverflows = 0;                                         // and clear ready for next test
+       Word = (uint16_t)GetAnalogueIn(4);
+       *(uint16_t *)(UDPBuffer+6) = htons(Word);                // exciter power
+       Word = (uint16_t)GetAnalogueIn(0);
+@@ -198,12 +203,13 @@ void *OutgoingHighPriority(void *arg)
+           memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
+           Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
+ 
+-      //
+-      // get ATU bit and offer to LDG ATU handler
+-      // power requested if bit 2 is zero
+-      Byte = ((Byte >> 2) & 1) ^1;
+-      ATUTuneRequest = (bool)Byte;
+-      RequestATUTune(ATUTuneRequest);
++          //
++          // get ATU bit and offer to LDG ATU handler
++          // power requested if bit 2 is zero
++          Byte = ((Byte >> 2) & 1) ^1;
++          ATUTuneRequest = (bool)Byte;
++          RequestATUTune(ATUTuneRequest);
++
+           if(Error == -1)
+           {
+             printf("High Priority Send Error to 2nd client, errno=%d\n", errno);
+@@ -214,19 +220,21 @@ void *OutgoingHighPriority(void *arg)
+       }
+       else
+         SequenceCounter2 = 0;
+-
+       //
+       // now we need to sleep for 1ms (in TX) or 200ms (not in TX)
+-      // BUT if any of the PTT or key inputs change, send a message immediately
++      // BUT if any of the PTT or key inputs change, or ADC overflow detected, send a message immediately
+       // so break up the 200ms period with smaller sleeps
+       // thank you to Rick N1GP for recommending this approach
+       //
+-      SleepCount = (MOXAsserted)? 2: 400;
++      SleepCount = (MOXAsserted) ? 2 : 400;
+       while (SleepCount-- > 0)
+       {
+         ReadStatusRegister();
+         if ((uint8_t)GetP2PTTKeyInputs() != PTTBits)
+           break;
++        ADCOverflows |= (uint8_t)GetADCOverflow();
++        if(ADCOverflows != 0)
++          break;
+         usleep(500);
+       }
+     }
+diff --git a/sw_projects/P2_app/OutMicAudio.c b/sw_projects/P2_app/OutMicAudio.c
+index 74525cb..4cab118 100644
+--- a/sw_projects/P2_app/OutMicAudio.c
++++ b/sw_projects/P2_app/OutMicAudio.c
+@@ -24,6 +24,8 @@
+ #include <unistd.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <pthread.h>
++#include <syscall.h>
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+ #include "../common/hwaccess.h"
+@@ -39,6 +41,9 @@
+ 
+     int DMAReadfile_fd = -1;								// DMA read file device (global, used also by wideband)
+ 
++
++
++
+ // this runs as its own thread to send outgoing data
+ // thread initiated after a "Start" command
+ // will be instructed to stop & exit by main loop setting enable_thread to 0
+@@ -66,8 +71,6 @@ void *OutgoingMicSamples(void *arg)
+ //
+     uint8_t* MicReadBuffer = NULL;							// data for DMA read from DDC
+     uint32_t MicBufferSize = VDMABUFFERSIZE;
+-    unsigned char* MicReadPtr;								// pointer for reading out a mic sample
+-    unsigned char* MicHeadPtr;								// ptr to 1st free location in mic memory
+     unsigned char* MicBasePtr;								// ptr to DMA location in mic memory
+     uint32_t Depth = 0;
+     uint32_t RegisterValue;
+@@ -83,7 +86,7 @@ void *OutgoingMicSamples(void *arg)
+ //
+     ThreadData = (struct ThreadSocketData *)arg;
+     ThreadData->Active = true;
+-    printf("spinning up outgoing mic thread with port %d\n", ThreadData->Portid);
++    printf("spinning up outgoing mic thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+ 
+ //
+ // setup DMA buffer
+@@ -94,16 +97,15 @@ void *OutgoingMicSamples(void *arg)
+         printf("mic read buffer allocation failed\n");
+         InitError = true;
+     }
+-    MicReadPtr = MicReadBuffer + VBASE;							// offset 4096 bytes into buffer
+-    MicHeadPtr = MicReadBuffer + VBASE;
+     MicBasePtr = MicReadBuffer + VBASE;
+     memset(MicReadBuffer, 0, MicBufferSize);
+ 
+ 
+   //
+   // open DMA device driver
++  // opened readonly to accommodate potential use of a different XDMA device driver
+   //
+-    DMAReadfile_fd = open(VMICDMADEVICE, O_RDWR);
++    DMAReadfile_fd = open(VMICDMADEVICE, O_RDONLY);
+     if (DMAReadfile_fd < 0)
+     {
+         printf("XDMA read device open failed for mic data\n");
+@@ -171,6 +173,7 @@ void *OutgoingMicSamples(void *arg)
+                 if(UseDebug)
+                     printf("Codec Mic FIFO Overthreshold, depth now = %d\n", Current);
+             }
++
+ // note this would often generate a message because we deliberately read it down to zero.
+ // this isn't a problem as we can send the data on without the code becoming blocked.
+ //            if((StartupCount == 0) && FIFOUnderflow)
+@@ -188,6 +191,7 @@ void *OutgoingMicSamples(void *arg)
+ //                if((StartupCount == 0) && FIFOUnderflow)
+ //                    printf("Codec Mic FIFO Underflowed, depth now = %d\n", Current);
+             }
++
+             // DMA shared with wideband samples, so get semaphore granting access
+             sem_wait(&MicWBDMAMutex);                       // get protected access
+             DMAReadFromFPGA(DMAReadfile_fd, MicBasePtr, VDMATRANSFERSIZE, VADDRMICSTREAMREAD);
+@@ -233,6 +237,7 @@ void *OutgoingMicSamples(void *arg)
+               SequenceCounter2 = 0;
+         }
+     }
++
+ //
+ // tidy shutdown of the thread
+ //
+diff --git a/sw_projects/P2_app/Outwideband.c b/sw_projects/P2_app/Outwideband.c
+index b7bfc78..72c1e7e 100644
+--- a/sw_projects/P2_app/Outwideband.c
++++ b/sw_projects/P2_app/Outwideband.c
+@@ -25,6 +25,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <fcntl.h>
++#include <pthread.h>
++#include <syscall.h>
+ #include "../common/saturnregisters.h"
+ #include "../common/hwaccess.h"
+ #include "../common/debugaids.h"
+@@ -210,7 +212,7 @@ void *OutgoingWidebandSamples(void *arg)
+     //
+ 
+     ThreadData = (struct ThreadSocketData*)arg;
+-    printf("spinning up outgoing Wideband sample thread with port %d\n", ThreadData->Portid);
++    printf("spinning up outgoing Wideband sample thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
+ 
+     //
+     // set up per-ADC data structures
+diff --git a/sw_projects/P2_app/andromedacatmessages.c b/sw_projects/P2_app/andromedacatmessages.c
+index 94039b9..41ec8df 100644
+--- a/sw_projects/P2_app/andromedacatmessages.c
++++ b/sw_projects/P2_app/andromedacatmessages.c
+@@ -102,7 +102,6 @@ void MakeProductVersionCAT(uint8_t ProductID, uint8_t HWVersion, uint8_t SWVersi
+     uint32_t CatParam;
+     CatParam = (ProductID * 100000) + (HWVersion*1000) + SWVersion;
+     MakeCATMessageNumeric(DESTTCPCATPORT, eZZZS, CatParam);
+-
+ }
+ 
+ 
+diff --git a/sw_projects/P2_app/cathandler.c b/sw_projects/P2_app/cathandler.c
+index bf3240f..6c65e20 100644
+--- a/sw_projects/P2_app/cathandler.c
++++ b/sw_projects/P2_app/cathandler.c
+@@ -29,6 +29,7 @@
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ #include <pthread.h>
++#include <syscall.h>
+ 
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+@@ -43,8 +44,10 @@
+ bool CATPortAssigned = false;                // true if CAT set up and active
+ int CATPort = 0;
+ bool ThreadActive = false;                  // true while CAT thread running
++bool CATKeepaliveActive = false;            // true while keepalive thread running
+ bool SignalThreadEnd = false;               // asserted to terminate thread
+ pthread_t CATThread;                        // thread reads/writes CAT commands
++pthread_t CATKeepaliveThread;               // thread requests activity every 15s
+ bool CATDebugPrint = false;                 // true if to print generated CAT messages
+ 
+ 
+@@ -336,7 +339,7 @@ int GetCATOPBufferUsed(void)
+   int Used;                           // number of occupied locations
+   Used = CATWritePtr - CATReadPtr;
+   if(Used < 0)
+-    Used +=  + VNUMOPSTRINGS;
++    Used += VNUMOPSTRINGS;
+   return Used;
+ }
+ 
+@@ -352,10 +355,10 @@ void SendCATMessage(char* Msg)
+     if((GetCATOPBufferUsed() <= (VNUMOPSTRINGS - 1))&&(CATPortAssigned == true))
+     {
+       strcpy(OutputStrings[CATWritePtr++], Msg);
+-      if (CATDebugPrint)
+-        printf("Sent CAT msg %s\n", Msg);                       // debug
+       if(CATWritePtr >= VNUMOPSTRINGS)
+         CATWritePtr = 0;
++      if (CATDebugPrint)
++        printf("Sent CAT msg %s\n", Msg);                       // debug
+     }
+   }
+ }
+@@ -527,7 +530,38 @@ void MakeCATMessageString(int Device, ECATCommands Cmd, char* Param)
+ 
+ 
+ 
++// this runs as its own thread to create activity at least every 15s
++// otherwise Thetis drops connection after 30s
++//
++void* CATKeepaliveThreadFunction(__attribute__((unused)) void *arg)
++{ 
++    int Cntr = 0;
+ 
++    printf("spinning up CAT keepalive thread, pid=%ld\n", syscall(SYS_gettid));
++
++//
++// wait up to 10s for SDR active to become set
++// (there seems to be a race condition between general packet to SDR and high priority data packet
++// and we can get here without it set)
++//
++    while((Cntr++ < 10 && !SDRActive))
++        sleep(1);
++
++    Cntr = 0;
++    CATKeepaliveActive = true;
++    while(SDRActive && !SignalThreadEnd)
++    {
++        if(Cntr++ == 1500)
++        {
++            MakeCATMessageNoParam(DESTTCPCATPORT, eZZXV);
++            Cntr = 0;
++        }
++        usleep(10000);                                                  // 10ms * 1500 = 15 sec delay between keepalives
++    }
++    printf("closing CAT keepalive thread\n");
++    CATKeepaliveActive = false;
++    return NULL;
++}
+ 
+ 
+ 
+@@ -548,6 +582,8 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
+     char ReadBuffer[1024] = {0};
+     char SendBuffer[1024] = {0};
+     unsigned int TXMessageLength;
++    int SendError = 0;
++
+ //    bool DebugMessageSent = false;
+ 
+ //
+@@ -567,7 +603,7 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
+       //
+       // create socket for TCP/IP connection
+       //
+-      printf("Creating CAT socket on port %d\n", CATPort);
++      printf("Creating CAT socket on port %d, pid=%ld\n", CATPort, syscall(SYS_gettid));
+       struct timeval ReadTimeout;                                       // read timeout
+       int yes = 1;
+       if((CATSocketid = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+@@ -619,18 +655,29 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
+               ParseCATCmd(ReadBuffer, DESTTCPCATPORT);
+               memset(ReadBuffer, 0, sizeof(ReadBuffer));
+           }
++          else if((ReadResult == -1) && (errno == 104))            // error 104 happens if server drops connection
++          {
++            printf("CAT server dropped connection\n");
++            ThreadError = true;
++          }
++
+           //
+           // if there are CAT messages available, send them
+           //
+-          while(GetCATOPBufferUsed() != 0)
++          while((GetCATOPBufferUsed() != 0) && !SignalThreadEnd && !ThreadError)
+           {
+             TXMessageLength = strlen(OutputStrings[CATReadPtr]);
+             strcpy(SendBuffer, OutputStrings[CATReadPtr++]);
+             if(CATReadPtr >= VNUMOPSTRINGS)
+               CATReadPtr = 0;
+-            send(CATSocketid, SendBuffer, TXMessageLength, 0);
++            SendError = send(CATSocketid, SendBuffer, TXMessageLength, 0);
++            if(SendError == -1)
++            {
++              perror("CAT send Error");
++              ThreadError = true; 
++              break;
++            }
+           }
+-
+       }                                                       // end of thread main loop
+       close(CATSocketid);
+       printf("Closing CAT Port & terminating thread\n");
+@@ -661,7 +708,7 @@ void SetupCATPort(int Port)
+     if (CATPort == 0)
+     {
+         CATPort = Port;
+-        printf("CATPort initiailised to %d\n", Port);
++        printf("CATPort initialised to %d\n", Port);
+         SignalThreadEnd = false;
+         ThreadActive = false;
+ 
+@@ -674,6 +721,15 @@ void SetupCATPort(int Port)
+               return;
+           }
+           pthread_detach(CATThread);
++          
++          // and create the keepalive
++          if(pthread_create(&CATKeepaliveThread, NULL, CATKeepaliveThreadFunction, NULL) < 0)
++          {
++              perror("pthread_create CAT keepalive");
++              CATPort = 0;
++              return;
++          }
++          pthread_detach(CATKeepaliveThread);
+         }
+     }  
+ }
+@@ -681,13 +737,13 @@ void SetupCATPort(int Port)
+ 
+ //
+ // function to shut down CAT handler
+-// only returns when shutdown is complete
++// only returns when shutdown of CAT handler and the keepalive is complete
+ // signal thread to shut down, then wait
+ //
+ void ShutdownCATHandler(void)
+ {
+     SignalThreadEnd = true;
+-    while(ThreadActive)
++    while(ThreadActive || CATKeepaliveActive)
+         usleep(1000);
+     SignalThreadEnd = false;
+ }
+diff --git a/sw_projects/P2_app/g2panel.c b/sw_projects/P2_app/g2panel.c
+index 478c2ad..77f419c 100644
+--- a/sw_projects/P2_app/g2panel.c
++++ b/sw_projects/P2_app/g2panel.c
+@@ -32,6 +32,7 @@
+ #include <pthread.h>
+ #include <gpiod.h>
+ #include <pthread.h>
++#include <syscall.h>
+ 
+ #include <linux/i2c-dev.h>
+ #include "../common/saturnregisters.h"
+@@ -83,7 +84,6 @@ struct timespec ts = {1, 0};
+ bool G2PanelActive = false;                         // true while panel active and threads should run
+ bool EncodersInitialised = false;                   // true after 1st scan
+ bool CATDetected = false;                           // true if panel ID message has been sent
+-uint32_t VKeepAliveCount;                           // count of ticks for keepalive
+ 
+ #define VNUMGPIOPUSHBUTTONS 4
+ #define VNUMMCPPUSHBUTTONS 16
+@@ -259,6 +259,7 @@ void* VFOEventHandler(__attribute__((unused)) void *arg)
+     uint8_t DirectionBit;
+     struct gpiod_line_event Event;
+ 
++    printf("Started VFO event handler thread, pid=%ld\n", syscall(SYS_gettid));
+     while(G2PanelActive)
+     {
+         returnval = gpiod_line_event_wait(VFO1, &ts);
+@@ -325,6 +326,7 @@ void* G2PanelTick(__attribute__((unused)) void *arg)
+     uint32_t Cntr;
+     bool I2Cerror;
+ 
++    printf("Started G2 panel tick thread, pid=%ld\n", syscall(SYS_gettid));
+     while(G2PanelActive)
+     {
+         if(CATPortAssigned)                     // see if CAT has become available for the 1st time
+@@ -395,14 +397,6 @@ void* G2PanelTick(__attribute__((unused)) void *arg)
+             //
+             Steps = ReadOpticalEncoder();
+             MakeVFOEncoderCAT(Steps);
+-            //
+-            // check keepalive
+-            //
+-            if(VKeepAliveCount++ > VKEEPALIVECOUNT)
+-            {
+-                VKeepAliveCount = 0;
+-                MakeCATMessageNoParam(DESTTCPCATPORT, eZZXV);
+-            }
+ 
+         }
+ 
+diff --git a/sw_projects/P2_app/g2v2panel.c b/sw_projects/P2_app/g2v2panel.c
+index f2a1de9..4a84673 100644
+--- a/sw_projects/P2_app/g2v2panel.c
++++ b/sw_projects/P2_app/g2v2panel.c
+@@ -41,7 +41,6 @@
+ 
+ #include <linux/i2c-dev.h>
+ #include "i2cdriver.h"
+-#include "gpiod.h"
+ #include "andromedacatmessages.h"
+ #include "AriesATU.h"
+ 
+@@ -61,7 +60,6 @@ pthread_t G2V1AdapterSerialThread;                    // thread wfor serial read
+ uint8_t G2V2PanelSWID;
+ uint8_t G2V2PanelHWVersion;
+ uint8_t G2V2PanelProductID;
+-uint32_t VKeepAliveCnt;                             // count of ticks for keepalive
+ uint8_t CATPollCntr;                                // determines which message to poll for
+ bool G2ToneState;                                   // true if 2 tone test in progress
+ bool GVFOBSelected;                                 // true if VFO B selected
+@@ -207,15 +205,6 @@ void* G2V2PanelTick(__attribute__((unused)) void *arg)
+                     break;
+             }
+ //
+-// check keepalive
+-// keep this in case we can ditch the polling at some point
+-//
+-        if(VKeepAliveCnt++ > VKEEPALIVECOUNT)
+-        {
+-            VKeepAliveCnt = 0;
+-            MakeCATMessageNoParam(DESTTCPCATPORT, eZZXV);
+-        }
+-//
+ // Set LEDs from values reported by CAT messages
+ // store into NewLEDStates; then set to I2C create ZZZI if different from what we had before
+ // ATU tune LEDs are internal to P2app, not Thetis
+@@ -353,6 +342,9 @@ void SetG2V2ZZZSState(uint8_t ProductID, uint8_t HWVersion, uint8_t SWID)
+     }
+     printf("; H/W verson = %d", HWVersion);
+     printf("; S/W verson = %d\n", SWID);
++    G2V2PanelProductID = ProductID;
++    G2V2PanelHWVersion = HWVersion;
++    G2V2PanelSWID = SWID;
+ }
+ 
+ 
+diff --git a/sw_projects/P2_app/g2v2panel_i2c.c b/sw_projects/P2_app/g2v2panel_i2c.c
+index 1f0e8a2..09af56f 100644
+--- a/sw_projects/P2_app/g2v2panel_i2c.c
++++ b/sw_projects/P2_app/g2v2panel_i2c.c
+@@ -31,6 +31,7 @@
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ #include <pthread.h>
++#include <syscall.h>
+ 
+ #include "../common/saturnregisters.h"
+ #include "../common/saturndrivers.h"
+@@ -291,6 +292,7 @@ void G2V2PanelTick(__attribute__((unused)) void *arg)
+ {
+     uint32_t NewLEDStates = 0;
+ 
++    printf("Started G2V2 panel tick thread, pid=%ld\n", syscall(SYS_gettid));
+     while(G2V2PanelActive)
+     {
+         if(CATPortAssigned)                     // see if CAT has become available for the 1st time
+diff --git a/sw_projects/P2_app/generalpacket.c b/sw_projects/P2_app/generalpacket.c
+index 2f62d18..8ece245 100644
+--- a/sw_projects/P2_app/generalpacket.c
++++ b/sw_projects/P2_app/generalpacket.c
+@@ -17,7 +17,6 @@
+ #include "threaddata.h"
+ #include <stddef.h>
+ #include <stdio.h>
+-#include <sys/socket.h>
+ #include "generalpacket.h"
+ #include "../common/saturnregisters.h"
+ #include "Outwideband.h"
+@@ -31,6 +30,7 @@ uint8_t WidebandSampleSize;
+ uint8_t WidebandUpdateRate;
+ uint8_t WidebandPacketsPerFrame;
+ 
++
+ //
+ // protocol 2 handler for General Packet to SDR
+ // parameter is a pointer to the UDP message buffer.
+diff --git a/sw_projects/P2_app/i2cdriver.c b/sw_projects/P2_app/i2cdriver.c
+index 1d2bc3d..93e2ffc 100644
+--- a/sw_projects/P2_app/i2cdriver.c
++++ b/sw_projects/P2_app/i2cdriver.c
+@@ -64,6 +64,7 @@ int i2c_write_word_data(uint8_t reg, uint16_t data)
+ 
+ //
+ // 8 bit read
++// used to detect presence of an MCP23017 in tests for G2V1 panel presence
+ //
+ uint8_t i2c_read_byte_data(uint8_t reg, bool *error) 
+ {
+@@ -74,7 +75,7 @@ uint8_t i2c_read_byte_data(uint8_t reg, bool *error)
+   if(data < 0)
+   {
+     *error = true;
+-    printf("error on i2c byte read, code=%d\n", data);
++    printf("I2C register not found, code=%d\n", data);
+   }
+   return (uint8_t) (data & 0xFF);
+ }
+@@ -93,7 +94,7 @@ uint16_t i2c_read_word_data(uint8_t reg, bool *error)
+   if(data < 0)
+   {
+     *error = true;
+-    printf("error on i2c word read, code=%d\n", data);
++    printf("I2C register not found, code=%d\n", data);
+   }
+   return (uint16_t) (data & 0xFFFF);
+ }
+diff --git a/sw_projects/P2_app/p2app.c b/sw_projects/P2_app/p2app.c
+index 0119227..5b03e5f 100644
+--- a/sw_projects/P2_app/p2app.c
++++ b/sw_projects/P2_app/p2app.c
+@@ -33,18 +33,21 @@
+ #include <arpa/inet.h>
+ #include <net/if.h>
+ #include <semaphore.h>
+-#include<signal.h>
++#include <signal.h>
+ #include <ifaddrs.h>
+ #include <netdb.h>
+ #include <sys/types.h>
+ #include <dirent.h>
++#include <pthread.h>
++#include <syscall.h>
++
+ 
+ #include "../common/saturntypes.h"
+ #include "../common/hwaccess.h"                     // access to PCIe read & write
+ #include "../common/saturnregisters.h"              // register I/O for Saturn
+ #include "../common/codecwrite.h"                   // codec register I/O for Saturn
+ #include "../common/version.h"                      // version I/O for Saturn
+-#include "../common/auxadc.h"                      // version I/O for Saturn
++#include "../common/auxadc.h"                       // version I/O for Saturn
+ 
+ #include "threaddata.h"
+ #include "generalpacket.h"
+@@ -62,7 +65,7 @@
+ #include "AriesATU.h"
+ #include "frontpanelhandler.h"
+ 
+-#define P2APPVERSION 35
++#define P2APPVERSION 40
+ #define FWREQUIREDMAJORVERSION 1                  // major version that is required. Only altered if programming interface changes. 
+ //
+ // the Firmware version is a protection to make sure that if a p2app update is required by the new firmware,
+@@ -70,6 +73,11 @@
+ //
+ //------------------------------------------------------------------------------------------
+ // VERSION History
++// V40: 29/6/2025:   Changes to accommodate a different XMDA device driver, if required in the future. No functional impact. 
++// V39: 18/02/2025:  ADC overflow now reported immediately while in RX
++// V38: 13/2/2025:   added FPGA version 18 required to run wideband code
++// V37: 3/2/2025:    CAT reliability issues addressed to prevent crash if thetis CAT server turned off. 
++// V36: 2/2/2025:    fixed G2V2 panel ID sent to Thetis. Fixed CAT thread 100% loading after 30s operation if no keepalive message sent (added keepalive thread). Thread PIDs displayed.
+ // V35: 1/2/2025:    removed warnings; no functional change
+ // V34: 21/01/2025:  changed code to find ethernet device name, not fixed eth0
+ // V33: 16/01/2025:  fix for OC outputs in wrong bit positions. CAT serial reliability fixed for front panel.
+@@ -109,6 +117,8 @@
+ //                   CW breakin properly enabled; CW keyer disabled if p2app not active;
+ //                   CW changes to minimise delay reporting to prototol 2
+ 
++
++
+ extern sem_t DDCInSelMutex;                 // protect access to shared DDC input select register
+ extern sem_t DDCResetFIFOMutex;             // protect access to FIFO reset register
+ extern sem_t RFGPIOMutex;                   // protect access to RF GPIO register
+@@ -315,8 +325,7 @@ int MakeSocket(struct ThreadSocketData* Ptr, int DDCid)
+ void* CheckForExitCommand(__attribute__((unused)) void *arg)
+ {
+   char ch;
+-
+-  printf("spinning up Check For Exit thread\n");
++  printf("spinning up Check For Exit thread, pid=%ld\n", syscall(SYS_gettid));
+   
+   while (1)
+   {
+@@ -342,7 +351,8 @@ void* CheckForActivity(__attribute__((unused)) void *arg)
+   bool PreviouslyActiveState2;
+   int i;
+   (void)arg; // squelch compiler warning
+-
++          
++  printf("Started check for activity thread, pid=%ld\n", syscall(SYS_gettid));
+   while(1)
+   {
+     sleep(1);                                   // wait for 1 second
+@@ -399,6 +409,7 @@ void Shutdown()
+     ShutdownFrontPanelHandler();
+   if(UseAriesATU)
+     ShutdownAriesHandler();
++
+   close(SocketData[0].Socketid);                          // close incoming data socket
+   sem_destroy(&DDCInSelMutex);
+   sem_destroy(&DDCResetFIFOMutex);
+@@ -432,7 +443,7 @@ int main(int argc, char *argv[])
+     2,                                            // 2 if not active; 3 if active
+     0,0,0,0,0,0,                                  // SDR (raspberry i) MAC address
+     10,                                           // board type. changed from "orion mk2" to "saturn"
+-    44,                                           // protocol version 4.3
++    44,                                           // protocol version 4.4
+     20,                                           // this SDR firmware version. >17 to enable QSK
+     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
+     4,                                            // 4DDC
+@@ -454,11 +465,12 @@ int main(int argc, char *argv[])
+   uint32_t TestFrequency;                                           // test source DDS freq
+   int CmdOption;                                                    // command line option
+   char BuildDate[]=GIT_DATE;
+-  ESoftwareID ID;
+-  unsigned int Version = 0;
++	ESoftwareID ID;
++	unsigned int Version = 0;
+   unsigned int MajorVersion = 0;
+   bool IncompatibleFirmware = false;                                // becomes set if firmware is not compatible with this version
+ 
++
+   //
+   // initialise register access semaphores
+   //
+@@ -467,19 +479,19 @@ int main(int argc, char *argv[])
+   sem_init(&RFGPIOMutex, 0, 1);                                     // for RF GPIO register
+   sem_init(&CodecRegMutex, 0, 1);                                   // for codec access
+   sem_init(&MicWBDMAMutex, 0, 1);                                   // for mic and WB DMA
+-
++    
+ //
+ // setup Saturn hardware
+ //
+   printf("SATURN Protocol 2 App. press 'x <enter>' in console to close\n");
+ 
+-  OpenXDMADriver();
++  OpenXDMADriver(false);
+   PrintVersionInfo();
+   printf("p2app client app software Version:%d Build Date:%s\n", P2APPVERSION, BuildDate);
+   PrintAuxADCInfo();
+   if (IsFallbackConfig())
+       printf("FPGA load is a fallback - you should re-flash the primary FPGA image!\n");
+-
++  
+   CodecInitialise();
+   InitialiseDACAttenROMs();
+ //  InitialiseCWKeyerRamp(true, 5000);                                // create initial default 5 ms ramp, P2
+@@ -515,6 +527,7 @@ int main(int argc, char *argv[])
+     printf("\n\n\n***************************************************************************\n");
+     IncompatibleFirmware = true;
+   }
++
+   // SetTXEnable(true);                                             // now only enabled if SDR active
+   EnableAlexManualFilterSelect(true);
+   SetBalancedMicInput(false);
+@@ -551,7 +564,7 @@ int main(int argc, char *argv[])
+         printf("-i orionmk2   board responds as board id = Orion mk 2\n");
+         printf("-m xlr        selects balanced XLR microphone input\n");
+         printf("-m jack       selects unbalanced 3.5mm microphone input\n");
+-        printf("-s skip checking for exit keys, run as service\n");
++        printf("-s            skip checking for exit keys, run as service\n");
+         printf("-d            print additional debug\n");
+         printf("-p            drive G2 control panel\n");
+         return EXIT_SUCCESS;
+@@ -576,6 +589,7 @@ int main(int argc, char *argv[])
+           return EXIT_SUCCESS;
+         }
+         break;
++
+       case 'i':
+         if(strcmp(optarg,"saturn") == 0)
+         {
+@@ -641,6 +655,7 @@ int main(int argc, char *argv[])
+   }
+   printf("\n");
+ 
++
+ //
+ // startup ATU handler if needed
+ //
+@@ -658,6 +673,7 @@ int main(int argc, char *argv[])
+ //
+   if(UseControlPanel)
+     InitialiseFrontPanelHandler();
++
+ //
+ // start up thread for exit command checking
+ //
+@@ -676,13 +692,15 @@ int main(int argc, char *argv[])
+   //
+   MakeSocket(SocketData, 0);
+ 
++  
++
+   //
+   // get this device MAC address
+   // original code joust picked up interface eth0, but that doesn't work with Radxa CM5
+   // revised code enumerated the interfaces, but had a startup race condition
+   //
+ 
+-
++  
+ #if 0 // original p2app code
+   memset(&hwaddr, 0, sizeof(hwaddr));
+   strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
+@@ -703,12 +721,12 @@ int main(int argc, char *argv[])
+         if ( !strcmp(ep->d_name, ".") || !strcmp(ep->d_name, "..") )
+         { 
+           continue;
+-      }
++        }
+         posp = strchr(ep->d_name, ch);
+         if ( posp == ep->d_name ) { 
+           printf("%s: interface name: %s\n", __FUNCTION__, ep->d_name);
+           break;
+-  }
++        }
+       }
+       (void) closedir(dp);
+     }
+@@ -717,11 +735,15 @@ int main(int argc, char *argv[])
+       printf("%s: Couldn't open the directory\n", __FUNCTION__);
+       return -1; 
+     }   
+-  memset(&hwaddr, 0, sizeof(hwaddr));
++    memset(&hwaddr, 0, sizeof(hwaddr));
+     strncpy(hwaddr.ifr_name, ep->d_name, IFNAMSIZ - 1); 
+-  ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
+-  for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
++    ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
++    for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
+ #endif
++  DiscoveryReply[13] = (uint8_t)Version;
++  DiscoveryReply[23] = (uint8_t)P2APPVERSION;
++  
++
+ 
+   MakeSocket(SocketData+VPORTDDCSPECIFIC, 0);            // create and bind a socket
+   if(pthread_create(&DDCSpecificThread, NULL, IncomingDDCSpecific, (void*)&SocketData[VPORTDDCSPECIFIC]) < 0)
+@@ -814,22 +836,28 @@ int main(int argc, char *argv[])
+   }
+   pthread_detach(DDCIQThread[0]);
+ 
++  if(Version >= 18)
++  {
+ //
+ // create outgoing wideband data thread which services bothe wideband0 and wideband1
+ // both sockets already exist so copy socket settings from existing sockets:
+ // wideband0 shares port 1027 with incoming high priority data
+ // wideband1 shares port 1028 with incoming DDC audio
+ //
+-  SocketData[VPORTWIDEBAND0].Socketid = SocketData[VPORTHIGHPRIORITYTOSDR].Socketid;
+-  SocketData[VPORTWIDEBAND1].Socketid = SocketData[VPORTSPKRAUDIO].Socketid;
+-  memcpy(&SocketData[VPORTWIDEBAND0].addr_cmddata, &SocketData[VPORTHIGHPRIORITYTOSDR].addr_cmddata, sizeof(struct sockaddr_in));
+-  memcpy(&SocketData[VPORTWIDEBAND1].addr_cmddata, &SocketData[VPORTSPKRAUDIO].addr_cmddata, sizeof(struct sockaddr_in));
+-  if(pthread_create(&WidebandDataThread, NULL, OutgoingWidebandSamples, (void*)&SocketData[VPORTWIDEBAND0]) < 0)
+-  {
+-    perror("pthread_create outgoing wideband data");
+-    return EXIT_FAILURE;
++    SocketData[VPORTWIDEBAND0].Socketid = SocketData[VPORTHIGHPRIORITYTOSDR].Socketid;
++    SocketData[VPORTWIDEBAND1].Socketid = SocketData[VPORTSPKRAUDIO].Socketid;
++    memcpy(&SocketData[VPORTWIDEBAND0].addr_cmddata, &SocketData[VPORTHIGHPRIORITYTOSDR].addr_cmddata, sizeof(struct sockaddr_in));
++    memcpy(&SocketData[VPORTWIDEBAND1].addr_cmddata, &SocketData[VPORTSPKRAUDIO].addr_cmddata, sizeof(struct sockaddr_in));
++    if(pthread_create(&WidebandDataThread, NULL, OutgoingWidebandSamples, (void*)&SocketData[VPORTWIDEBAND0]) < 0)
++    {
++      perror("pthread_create outgoing wideband data");
++      return EXIT_FAILURE;
++    }
++    pthread_detach(WidebandDataThread);
+   }
+-  pthread_detach(WidebandDataThread);
++
++
++
+ 
+ 
+   //
+@@ -868,7 +896,7 @@ int main(int argc, char *argv[])
+ // (that means we can't handle the programming packet but we don't use that anyway)
+ //
+     CmdByte = UDPInBuffer[4];
+-    if(size==VDISCOVERYSIZE)
++    if(size==VDISCOVERYSIZE)  
+     {
+       switch(CmdByte)
+       {
+@@ -970,3 +998,7 @@ int main(int argc, char *argv[])
+   Shutdown();
+   return EXIT_SUCCESS;
+ }
++
++
++
++
+diff --git a/sw_projects/P2_app/serialport.c b/sw_projects/P2_app/serialport.c
+index 955e4c8..df00daa 100644
+--- a/sw_projects/P2_app/serialport.c
++++ b/sw_projects/P2_app/serialport.c
+@@ -23,6 +23,9 @@
+ #include <unistd.h>
+ #include <string.h>
+ #include <stdio.h>
++#include <pthread.h>
++#include <syscall.h>
++
+ 
+ #include "serialport.h"
+ #include "cathandler.h"
+@@ -111,7 +114,7 @@ void* CATSerial(void *arg)
+     DeviceData -> DeviceHandle = OpenSerialPort(DeviceData -> PathName, DeviceData -> Baud);
+     if(DeviceData -> DeviceHandle != -1)
+     {
+-        printf("Setting up CAT Serial read handler thread for device %s\n", DeviceNames[(int)DeviceData->Device]);
++        printf("Setting up CAT Serial read handler thread for device %s, pid=%ld\n", DeviceNames[(int)DeviceData->Device], syscall(SYS_gettid));
+         DeviceData -> IsOpen = true;
+         DeviceData -> DeviceActive = true;
+         sleep(1);                                   // allow serial to start (particularly for USB)
+diff --git a/sw_projects/P2_app/threaddata.h b/sw_projects/P2_app/threaddata.h
+index dbc2b7f..bcbc231 100644
+--- a/sw_projects/P2_app/threaddata.h
++++ b/sw_projects/P2_app/threaddata.h
+@@ -24,6 +24,7 @@
+ #include <semaphore.h>
+ 
+ 
++
+ //
+ // list of port numbers, provided in the general packet
+ // (port 1024 for discovery and general packets not needed in this list)
+@@ -86,6 +87,7 @@ extern bool UseDebug;                               // true if debugging enabled
+ extern uint8_t GlobalFIFOOverflows;                 // FIFO overflow words
+ extern sem_t MicWBDMAMutex;                         // protect one DMA read channel shared by mic and WB read
+ 
++
+ #define VBITCHANGEPORT 1                        // if set, thread must close its socket and open a new one on different port
+ #define VBITINTERLEAVE 2                        // if set, DDC threads should interleave data
+ #define VBITDDCENABLE 4                         // if set, DDC is enabled

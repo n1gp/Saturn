@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "../common/saturnregisters.h"
+#include <pthread.h>
+#include <syscall.h>
 
 
 
@@ -55,7 +57,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
 
     ThreadData = (struct ThreadSocketData *)arg;
     ThreadData->Active = true;
-    printf("spinning up DUC specific thread with port %d\n", ThreadData->Portid);
+    printf("spinning up DUC specific thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
     //
     // main processing loop
     //
@@ -93,7 +95,6 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
             if(TXActive == 2) continue;
           }
 
-          //printf("DUC packet received\n");
 // iambic settings
           IambicSpeed = *(uint8_t*)(UDPInBuffer+9);               // keyer speed
           IambicWeight = *(uint8_t*)(UDPInBuffer+10);             // keyer weight
@@ -119,6 +120,7 @@ void *IncomingDUCSpecific(void *arg)                    // listener thread
               CWRampTime_us = 1000 * CWRampTime;
               InitialiseCWKeyerRamp(true, CWRampTime_us);         // create required ramp, P2
           }
+
 // mic and line in options
           Byte = *(uint8_t*)(UDPInBuffer+50);                     // mic/line options
           SetMicBoost((bool)((Byte >> 1)&1));

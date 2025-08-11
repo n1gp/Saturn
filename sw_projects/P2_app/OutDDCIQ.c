@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <syscall.h>
 #include "../common/saturnregisters.h"
 #include "../common/saturndrivers.h"
 #include "../common/hwaccess.h"
@@ -303,8 +305,9 @@ void *OutgoingDDCIQ(void *arg)
     InitError = CreateDynamicMemory();
     //
     // open DMA device driver
+    // opened readonly to accommodate potential use of a different XDMA device driver
     //
-    IQReadfile_fd = open(VDDCDMADEVICE, O_RDWR);
+    IQReadfile_fd = open(VDDCDMADEVICE, O_RDONLY);
     if (IQReadfile_fd < 0)
     {
         printf("XDMA read device open failed for DDC data\n");
@@ -312,7 +315,7 @@ void *OutgoingDDCIQ(void *arg)
     }
 
     ThreadData = (struct ThreadSocketData*)arg;
-    printf("spinning up outgoing I/Q thread with port %d\n", ThreadData->Portid);
+    printf("spinning up outgoing I/Q thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
 
     //
     // set up per-DDC data structures
@@ -337,9 +340,9 @@ void *OutgoingDDCIQ(void *arg)
     SetupFIFOMonitorChannel(eRXDDCDMA, false);
     ResetDMAStreamFIFO(eRXDDCDMA);
     RegisterValue = ReadFIFOMonitorChannel(eRXDDCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);				// read the FIFO Depth register
-    if(UseDebug)
-      printf("DDC FIFO Depth register = %08x (should be ~0)\n", RegisterValue);
-    Depth=0;
+	if(UseDebug)
+        printf("DDC FIFO Depth register = %08x (should be ~0)\n", RegisterValue);
+	Depth=0;
 
 
 //
@@ -369,6 +372,7 @@ void *OutgoingDDCIQ(void *arg)
         for (DDC = 0; DDC < VNUMDDC; DDC++)
         {
             SequenceCounter[DDC] = 0;
+            memcpy(&DestAddr[DDC], &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address (reply_addr is global)
             memset(&iovecinst[DDC], 0, sizeof(struct iovec));
             memset(&datagram[DDC], 0, sizeof(struct msghdr));
             iovecinst[DDC].iov_base = UDPBuffer[DDC];
@@ -399,7 +403,7 @@ void *OutgoingDDCIQ(void *arg)
 
                 while ((IQHeadPtr[DDC] - IQReadPtr[DDC]) > VIQBYTESPERFRAME)
                 {
-                    //printf("enough data for packet: DDC=%d\n", DDC);
+//                    printf("enough data for packet: DDC= %d\n", DDC);
                     *(uint32_t*)UDPBuffer[DDC] = htonl(SequenceCounter[DDC]++);     // add sequence count
                     memset(UDPBuffer[DDC] + 4, 0, 8);                               // clear the timestamp data
                     *(uint16_t*)(UDPBuffer[DDC] + 12) = htons(24);                  // bits per sample
@@ -457,6 +461,7 @@ void *OutgoingDDCIQ(void *arg)
             // the latter approach seems easier!
             //
             Depth = ReadFIFOMonitorChannel(eRXDDCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);				// read the FIFO Depth register
+
             if((StartupCount == 0) && FIFOOverThreshold)
             {
                 GlobalFIFOOverflows |= 0b00000001;

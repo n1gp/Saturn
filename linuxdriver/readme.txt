@@ -125,6 +125,8 @@ Usage:
 
 
         sudo apt install raspberrypi-kernel-headers
+
+
   - If you are updating: unload the previous driver from memory.
         sudo rmmod -s xdma
   
@@ -133,7 +135,7 @@ Usage:
 
   - Compile and install the kernel module driver.
         make
-        sudo make install
+		sudo make install
 
   - Load the kernel module driver:
 	sudo modprobe xdma

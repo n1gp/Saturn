@@ -27,6 +27,9 @@
 #include "../common/saturnregisters.h"
 #include "../common/saturndrivers.h"
 #include "../common/hwaccess.h"
+#include <pthread.h>
+#include <syscall.h>
+
 
 
 
@@ -40,7 +43,6 @@
 #define VSTARTUPDELAY 100                           // 100 messages (~100ms) before reporting under or overflows
 
 int TXActive = 0;   // The client actively transmitting, 0-none, 1-xdma, 2-network
-
 //
 // listener thread for incoming DUC I/Q packets
 // planned strategy: just DMA spkr data when available; don't copy and DMA a larger amount.
@@ -64,9 +66,6 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
 //
     uint8_t* IQWriteBuffer = NULL;							// data for DMA to write to DUC
     uint32_t IQBufferSize = VDMABUFFERSIZE;
-    bool InitError = false;                                 // becomes true if we get an initialisation error
-    unsigned char* IQReadPtr;								// pointer for reading out an I/Q sample
-    unsigned char* IQHeadPtr;								// ptr to 1st free location in I/Q memory
     unsigned char* IQBasePtr;								// ptr to DMA location in I/Q memory
     uint32_t Depth = 0;
     int DMAWritefile_fd = -1;								// DMA read file device
@@ -80,31 +79,24 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
 
     ThreadData = (struct ThreadSocketData *)arg;
     ThreadData->Active = true;
-    printf("spinning up DUC I/Q thread with port %d\n", ThreadData->Portid);
+    printf("spinning up DUC I/Q thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
   
     //
     // setup DMA buffer
     //
     posix_memalign((void**)&IQWriteBuffer, VALIGNMENT, IQBufferSize);
     if (!IQWriteBuffer)
-    {
         printf("I/Q TX write buffer allocation failed\n");
-        InitError = true;
-    }
-    IQReadPtr = IQWriteBuffer + VBASE;							// offset 4096 bytes into buffer
-    IQHeadPtr = IQWriteBuffer + VBASE;
     IQBasePtr = IQWriteBuffer + VBASE;
     memset(IQWriteBuffer, 0, IQBufferSize);
 
     //
     // open DMA device driver
+    // opened write only to accommodate potential use of a different XDMA device driver
     //
-    DMAWritefile_fd = open(VDUCDMADEVICE, O_RDWR);
+    DMAWritefile_fd = open(VDUCDMADEVICE, O_WRONLY);
     if (DMAWritefile_fd < 0)
-    {
         printf("XDMA write device open failed for TX I/Q data\n");
-        InitError = true;
-    }
         
 //
 // setup hardware
@@ -163,6 +155,7 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
             Depth = ReadFIFOMonitorChannel(eTXDUCDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);           // read the FIFO free locations
             if((StartupCount == 0) && FIFOOverThreshold && UseDebug)
                 printf("TX DUC FIFO Overthreshold, depth now = %d\n", Current);
+
             if((StartupCount == 0) && FIFOUnderflow)
             {
                 GlobalFIFOOverflows |= 0b00000100;
@@ -219,5 +212,4 @@ void *IncomingDUCIQ(void *arg)                          // listener thread
 // 
 void HandlerSetEERMode(__attribute__((unused)) bool EEREnabled)
 {
-
 }

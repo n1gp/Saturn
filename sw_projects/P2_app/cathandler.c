@@ -29,6 +29,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <syscall.h>
 
 #include "../common/saturnregisters.h"
 #include "../common/saturndrivers.h"
@@ -43,8 +44,10 @@
 bool CATPortAssigned = false;                // true if CAT set up and active
 int CATPort = 0;
 bool ThreadActive = false;                  // true while CAT thread running
+bool CATKeepaliveActive = false;            // true while keepalive thread running
 bool SignalThreadEnd = false;               // asserted to terminate thread
 pthread_t CATThread;                        // thread reads/writes CAT commands
+pthread_t CATKeepaliveThread;               // thread requests activity every 15s
 bool CATDebugPrint = false;                 // true if to print generated CAT messages
 
 
@@ -336,7 +339,7 @@ int GetCATOPBufferUsed(void)
   int Used;                           // number of occupied locations
   Used = CATWritePtr - CATReadPtr;
   if(Used < 0)
-    Used +=  + VNUMOPSTRINGS;
+    Used += VNUMOPSTRINGS;
   return Used;
 }
 
@@ -352,10 +355,10 @@ void SendCATMessage(char* Msg)
     if((GetCATOPBufferUsed() <= (VNUMOPSTRINGS - 1))&&(CATPortAssigned == true))
     {
       strcpy(OutputStrings[CATWritePtr++], Msg);
-      if (CATDebugPrint)
-        printf("Sent CAT msg %s\n", Msg);                       // debug
       if(CATWritePtr >= VNUMOPSTRINGS)
         CATWritePtr = 0;
+      if (CATDebugPrint)
+        printf("Sent CAT msg %s\n", Msg);                       // debug
     }
   }
 }
@@ -527,7 +530,38 @@ void MakeCATMessageString(int Device, ECATCommands Cmd, char* Param)
 
 
 
+// this runs as its own thread to create activity at least every 15s
+// otherwise Thetis drops connection after 30s
+//
+void* CATKeepaliveThreadFunction(__attribute__((unused)) void *arg)
+{ 
+    int Cntr = 0;
 
+    printf("spinning up CAT keepalive thread, pid=%ld\n", syscall(SYS_gettid));
+
+//
+// wait up to 10s for SDR active to become set
+// (there seems to be a race condition between general packet to SDR and high priority data packet
+// and we can get here without it set)
+//
+    while((Cntr++ < 10 && !SDRActive))
+        sleep(1);
+
+    Cntr = 0;
+    CATKeepaliveActive = true;
+    while(SDRActive && !SignalThreadEnd)
+    {
+        if(Cntr++ == 1500)
+        {
+            MakeCATMessageNoParam(DESTTCPCATPORT, eZZXV);
+            Cntr = 0;
+        }
+        usleep(10000);                                                  // 10ms * 1500 = 15 sec delay between keepalives
+    }
+    printf("closing CAT keepalive thread\n");
+    CATKeepaliveActive = false;
+    return NULL;
+}
 
 
 
@@ -548,6 +582,8 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
     char ReadBuffer[1024] = {0};
     char SendBuffer[1024] = {0};
     unsigned int TXMessageLength;
+    int SendError = 0;
+
 //    bool DebugMessageSent = false;
 
 //
@@ -567,7 +603,7 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
       //
       // create socket for TCP/IP connection
       //
-      printf("Creating CAT socket on port %d\n", CATPort);
+      printf("Creating CAT socket on port %d, pid=%ld\n", CATPort, syscall(SYS_gettid));
       struct timeval ReadTimeout;                                       // read timeout
       int yes = 1;
       if((CATSocketid = socket(AF_INET, SOCK_STREAM, 0)) < 0)
@@ -619,18 +655,29 @@ void* CATHandlerThread(__attribute__((unused)) void *arg)
               ParseCATCmd(ReadBuffer, DESTTCPCATPORT);
               memset(ReadBuffer, 0, sizeof(ReadBuffer));
           }
+          else if((ReadResult == -1) && (errno == 104))            // error 104 happens if server drops connection
+          {
+            printf("CAT server dropped connection\n");
+            ThreadError = true;
+          }
+
           //
           // if there are CAT messages available, send them
           //
-          while(GetCATOPBufferUsed() != 0)
+          while((GetCATOPBufferUsed() != 0) && !SignalThreadEnd && !ThreadError)
           {
             TXMessageLength = strlen(OutputStrings[CATReadPtr]);
             strcpy(SendBuffer, OutputStrings[CATReadPtr++]);
             if(CATReadPtr >= VNUMOPSTRINGS)
               CATReadPtr = 0;
-            send(CATSocketid, SendBuffer, TXMessageLength, 0);
+            SendError = send(CATSocketid, SendBuffer, TXMessageLength, 0);
+            if(SendError == -1)
+            {
+              perror("CAT send Error");
+              ThreadError = true; 
+              break;
+            }
           }
-
       }                                                       // end of thread main loop
       close(CATSocketid);
       printf("Closing CAT Port & terminating thread\n");
@@ -661,7 +708,7 @@ void SetupCATPort(int Port)
     if (CATPort == 0)
     {
         CATPort = Port;
-        printf("CATPort initiailised to %d\n", Port);
+        printf("CATPort initialised to %d\n", Port);
         SignalThreadEnd = false;
         ThreadActive = false;
 
@@ -674,6 +721,15 @@ void SetupCATPort(int Port)
               return;
           }
           pthread_detach(CATThread);
+          
+          // and create the keepalive
+          if(pthread_create(&CATKeepaliveThread, NULL, CATKeepaliveThreadFunction, NULL) < 0)
+          {
+              perror("pthread_create CAT keepalive");
+              CATPort = 0;
+              return;
+          }
+          pthread_detach(CATKeepaliveThread);
         }
     }  
 }
@@ -681,13 +737,13 @@ void SetupCATPort(int Port)
 
 //
 // function to shut down CAT handler
-// only returns when shutdown is complete
+// only returns when shutdown of CAT handler and the keepalive is complete
 // signal thread to shut down, then wait
 //
 void ShutdownCATHandler(void)
 {
     SignalThreadEnd = true;
-    while(ThreadActive)
+    while(ThreadActive || CATKeepaliveActive)
         usleep(1000);
     SignalThreadEnd = false;
 }

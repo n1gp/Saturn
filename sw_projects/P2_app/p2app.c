@@ -33,18 +33,21 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <semaphore.h>
-#include<signal.h>
+#include <signal.h>
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <pthread.h>
+#include <syscall.h>
+
 
 #include "../common/saturntypes.h"
 #include "../common/hwaccess.h"                     // access to PCIe read & write
 #include "../common/saturnregisters.h"              // register I/O for Saturn
 #include "../common/codecwrite.h"                   // codec register I/O for Saturn
 #include "../common/version.h"                      // version I/O for Saturn
-#include "../common/auxadc.h"                      // version I/O for Saturn
+#include "../common/auxadc.h"                       // version I/O for Saturn
 
 #include "threaddata.h"
 #include "generalpacket.h"
@@ -62,7 +65,7 @@
 #include "AriesATU.h"
 #include "frontpanelhandler.h"
 
-#define P2APPVERSION 35
+#define P2APPVERSION 40
 #define FWREQUIREDMAJORVERSION 1                  // major version that is required. Only altered if programming interface changes. 
 //
 // the Firmware version is a protection to make sure that if a p2app update is required by the new firmware,
@@ -70,6 +73,11 @@
 //
 //------------------------------------------------------------------------------------------
 // VERSION History
+// V40: 29/6/2025:   Changes to accommodate a different XMDA device driver, if required in the future. No functional impact. 
+// V39: 18/02/2025:  ADC overflow now reported immediately while in RX
+// V38: 13/2/2025:   added FPGA version 18 required to run wideband code
+// V37: 3/2/2025:    CAT reliability issues addressed to prevent crash if thetis CAT server turned off. 
+// V36: 2/2/2025:    fixed G2V2 panel ID sent to Thetis. Fixed CAT thread 100% loading after 30s operation if no keepalive message sent (added keepalive thread). Thread PIDs displayed.
 // V35: 1/2/2025:    removed warnings; no functional change
 // V34: 21/01/2025:  changed code to find ethernet device name, not fixed eth0
 // V33: 16/01/2025:  fix for OC outputs in wrong bit positions. CAT serial reliability fixed for front panel.
@@ -108,6 +116,8 @@
 // V12, 29/7/2023:   CW changes to set RX attenuation on TX from protocol bytes 58, 59;
 //                   CW breakin properly enabled; CW keyer disabled if p2app not active;
 //                   CW changes to minimise delay reporting to prototol 2
+
+
 
 extern sem_t DDCInSelMutex;                 // protect access to shared DDC input select register
 extern sem_t DDCResetFIFOMutex;             // protect access to FIFO reset register
@@ -315,8 +325,7 @@ int MakeSocket(struct ThreadSocketData* Ptr, int DDCid)
 void* CheckForExitCommand(__attribute__((unused)) void *arg)
 {
   char ch;
-
-  printf("spinning up Check For Exit thread\n");
+  printf("spinning up Check For Exit thread, pid=%ld\n", syscall(SYS_gettid));
   
   while (1)
   {
@@ -342,7 +351,8 @@ void* CheckForActivity(__attribute__((unused)) void *arg)
   bool PreviouslyActiveState2;
   int i;
   (void)arg; // squelch compiler warning
-
+          
+  printf("Started check for activity thread, pid=%ld\n", syscall(SYS_gettid));
   while(1)
   {
     sleep(1);                                   // wait for 1 second
@@ -399,6 +409,7 @@ void Shutdown()
     ShutdownFrontPanelHandler();
   if(UseAriesATU)
     ShutdownAriesHandler();
+
   close(SocketData[0].Socketid);                          // close incoming data socket
   sem_destroy(&DDCInSelMutex);
   sem_destroy(&DDCResetFIFOMutex);
@@ -432,7 +443,7 @@ int main(int argc, char *argv[])
     2,                                            // 2 if not active; 3 if active
     0,0,0,0,0,0,                                  // SDR (raspberry i) MAC address
     10,                                           // board type. changed from "orion mk2" to "saturn"
-    44,                                           // protocol version 4.3
+    44,                                           // protocol version 4.4
     20,                                           // this SDR firmware version. >17 to enable QSK
     0,0,0,0,0,0,                                  // Mercury, Metis, Penny version numbers
     4,                                            // 4DDC
@@ -454,10 +465,11 @@ int main(int argc, char *argv[])
   uint32_t TestFrequency;                                           // test source DDS freq
   int CmdOption;                                                    // command line option
   char BuildDate[]=GIT_DATE;
-  ESoftwareID ID;
-  unsigned int Version = 0;
+	ESoftwareID ID;
+	unsigned int Version = 0;
   unsigned int MajorVersion = 0;
   bool IncompatibleFirmware = false;                                // becomes set if firmware is not compatible with this version
+
 
   //
   // initialise register access semaphores
@@ -467,19 +479,19 @@ int main(int argc, char *argv[])
   sem_init(&RFGPIOMutex, 0, 1);                                     // for RF GPIO register
   sem_init(&CodecRegMutex, 0, 1);                                   // for codec access
   sem_init(&MicWBDMAMutex, 0, 1);                                   // for mic and WB DMA
-
+    
 //
 // setup Saturn hardware
 //
   printf("SATURN Protocol 2 App. press 'x <enter>' in console to close\n");
 
-  OpenXDMADriver();
+  OpenXDMADriver(false);
   PrintVersionInfo();
   printf("p2app client app software Version:%d Build Date:%s\n", P2APPVERSION, BuildDate);
   PrintAuxADCInfo();
   if (IsFallbackConfig())
       printf("FPGA load is a fallback - you should re-flash the primary FPGA image!\n");
-
+  
   CodecInitialise();
   InitialiseDACAttenROMs();
 //  InitialiseCWKeyerRamp(true, 5000);                                // create initial default 5 ms ramp, P2
@@ -515,6 +527,7 @@ int main(int argc, char *argv[])
     printf("\n\n\n***************************************************************************\n");
     IncompatibleFirmware = true;
   }
+
   // SetTXEnable(true);                                             // now only enabled if SDR active
   EnableAlexManualFilterSelect(true);
   SetBalancedMicInput(false);
@@ -551,7 +564,7 @@ int main(int argc, char *argv[])
         printf("-i orionmk2   board responds as board id = Orion mk 2\n");
         printf("-m xlr        selects balanced XLR microphone input\n");
         printf("-m jack       selects unbalanced 3.5mm microphone input\n");
-        printf("-s skip checking for exit keys, run as service\n");
+        printf("-s            skip checking for exit keys, run as service\n");
         printf("-d            print additional debug\n");
         printf("-p            drive G2 control panel\n");
         return EXIT_SUCCESS;
@@ -576,6 +589,7 @@ int main(int argc, char *argv[])
           return EXIT_SUCCESS;
         }
         break;
+
       case 'i':
         if(strcmp(optarg,"saturn") == 0)
         {
@@ -641,6 +655,7 @@ int main(int argc, char *argv[])
   }
   printf("\n");
 
+
 //
 // startup ATU handler if needed
 //
@@ -658,6 +673,7 @@ int main(int argc, char *argv[])
 //
   if(UseControlPanel)
     InitialiseFrontPanelHandler();
+
 //
 // start up thread for exit command checking
 //
@@ -676,13 +692,15 @@ int main(int argc, char *argv[])
   //
   MakeSocket(SocketData, 0);
 
+  
+
   //
   // get this device MAC address
   // original code joust picked up interface eth0, but that doesn't work with Radxa CM5
   // revised code enumerated the interfaces, but had a startup race condition
   //
 
-
+  
 #if 0 // original p2app code
   memset(&hwaddr, 0, sizeof(hwaddr));
   strncpy(hwaddr.ifr_name, "eth0", IFNAMSIZ - 1);
@@ -703,12 +721,12 @@ int main(int argc, char *argv[])
         if ( !strcmp(ep->d_name, ".") || !strcmp(ep->d_name, "..") )
         { 
           continue;
-      }
+        }
         posp = strchr(ep->d_name, ch);
         if ( posp == ep->d_name ) { 
           printf("%s: interface name: %s\n", __FUNCTION__, ep->d_name);
           break;
-  }
+        }
       }
       (void) closedir(dp);
     }
@@ -717,11 +735,15 @@ int main(int argc, char *argv[])
       printf("%s: Couldn't open the directory\n", __FUNCTION__);
       return -1; 
     }   
-  memset(&hwaddr, 0, sizeof(hwaddr));
+    memset(&hwaddr, 0, sizeof(hwaddr));
     strncpy(hwaddr.ifr_name, ep->d_name, IFNAMSIZ - 1); 
-  ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
-  for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
+    ioctl(SocketData[VPORTCOMMAND].Socketid, SIOCGIFHWADDR, &hwaddr);
+    for(i = 0; i < 6; ++i) DiscoveryReply[i + 5] = hwaddr.ifr_addr.sa_data[i];         // copy MAC to reply message
 #endif
+  DiscoveryReply[13] = (uint8_t)Version;
+  DiscoveryReply[23] = (uint8_t)P2APPVERSION;
+  
+
 
   MakeSocket(SocketData+VPORTDDCSPECIFIC, 0);            // create and bind a socket
   if(pthread_create(&DDCSpecificThread, NULL, IncomingDDCSpecific, (void*)&SocketData[VPORTDDCSPECIFIC]) < 0)
@@ -814,22 +836,28 @@ int main(int argc, char *argv[])
   }
   pthread_detach(DDCIQThread[0]);
 
+  if(Version >= 18)
+  {
 //
 // create outgoing wideband data thread which services bothe wideband0 and wideband1
 // both sockets already exist so copy socket settings from existing sockets:
 // wideband0 shares port 1027 with incoming high priority data
 // wideband1 shares port 1028 with incoming DDC audio
 //
-  SocketData[VPORTWIDEBAND0].Socketid = SocketData[VPORTHIGHPRIORITYTOSDR].Socketid;
-  SocketData[VPORTWIDEBAND1].Socketid = SocketData[VPORTSPKRAUDIO].Socketid;
-  memcpy(&SocketData[VPORTWIDEBAND0].addr_cmddata, &SocketData[VPORTHIGHPRIORITYTOSDR].addr_cmddata, sizeof(struct sockaddr_in));
-  memcpy(&SocketData[VPORTWIDEBAND1].addr_cmddata, &SocketData[VPORTSPKRAUDIO].addr_cmddata, sizeof(struct sockaddr_in));
-  if(pthread_create(&WidebandDataThread, NULL, OutgoingWidebandSamples, (void*)&SocketData[VPORTWIDEBAND0]) < 0)
-  {
-    perror("pthread_create outgoing wideband data");
-    return EXIT_FAILURE;
+    SocketData[VPORTWIDEBAND0].Socketid = SocketData[VPORTHIGHPRIORITYTOSDR].Socketid;
+    SocketData[VPORTWIDEBAND1].Socketid = SocketData[VPORTSPKRAUDIO].Socketid;
+    memcpy(&SocketData[VPORTWIDEBAND0].addr_cmddata, &SocketData[VPORTHIGHPRIORITYTOSDR].addr_cmddata, sizeof(struct sockaddr_in));
+    memcpy(&SocketData[VPORTWIDEBAND1].addr_cmddata, &SocketData[VPORTSPKRAUDIO].addr_cmddata, sizeof(struct sockaddr_in));
+    if(pthread_create(&WidebandDataThread, NULL, OutgoingWidebandSamples, (void*)&SocketData[VPORTWIDEBAND0]) < 0)
+    {
+      perror("pthread_create outgoing wideband data");
+      return EXIT_FAILURE;
+    }
+    pthread_detach(WidebandDataThread);
   }
-  pthread_detach(WidebandDataThread);
+
+
+
 
 
   //
@@ -868,7 +896,7 @@ int main(int argc, char *argv[])
 // (that means we can't handle the programming packet but we don't use that anyway)
 //
     CmdByte = UDPInBuffer[4];
-    if(size==VDISCOVERYSIZE)
+    if(size==VDISCOVERYSIZE)  
     {
       switch(CmdByte)
       {
@@ -970,3 +998,7 @@ int main(int argc, char *argv[])
   Shutdown();
   return EXIT_SUCCESS;
 }
+
+
+
+

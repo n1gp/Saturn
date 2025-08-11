@@ -28,6 +28,9 @@
 #include "../common/version.h"
 #include "cathandler.h"
 #include "AriesATU.h"
+#include <pthread.h>
+#include <syscall.h>
+
 
 extern bool AriesATUActive;                             // true if Aries is operating
 
@@ -58,7 +61,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
 
   ThreadData = (struct ThreadSocketData *)arg;
   ThreadData->Active = true;
-  printf("spinning up high priority incoming thread with port %d\n", ThreadData->Portid);
+  printf("spinning up high priority incoming thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
   FPGAVersion = GetFirmwareVersion(&FPGASWID);          // get version of FPGA code
 
   //
@@ -81,6 +84,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       printf("error number = %d\n", errno);
       EXIT_FAILURE;
     }
+
     //
     // if correct packet, process it
     //
@@ -151,8 +155,8 @@ void *IncomingHighPriority(void *arg)                   // listener thread
         {
           SDRActive = false;                                       // set state of whole app
           SetTXEnable(false);
-        IsTXMode = false;
-        SetMOX(false);
+          IsTXMode = false;
+          SetMOX(false);
           EnableCW(false, false);
           StartBitReceived = false;
           ReplyAddressSet = false;
@@ -174,12 +178,17 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       SetAriesTXFrequency(LongWord);
       Byte = (uint8_t)(UDPInBuffer[345]);
       SetTXDriveLevel(Byte);
+
       //
-      // CAT port (if set)
+      // create CAT port (if set)
+      // shut down CAT port if not set and the CAT thread is active
       //
       Word = ntohs(*(uint16_t *)(UDPInBuffer+1398));
       if(Word != 0)
         SetupCATPort(Word);
+      else if (Word == 0 && CATPortAssigned)
+        ShutdownCATHandler();
+
       //
       // transverter, speaker mute, open collector, user outputs
       // open collector data is in bits 7:1; move to 6:0
@@ -191,6 +200,7 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       SetOpenCollectorOutputs(Byte >> 1);
       Byte = (uint8_t)(UDPInBuffer[1402]);
       SetUserOutputBits(Byte);
+
       //
       // Alex
       // behaviour needs to be FPGA version specific: at V12, separate register added for Alex TX antennas
@@ -248,9 +258,6 @@ void *IncomingHighPriority(void *arg)                   // listener thread
       Byte = (uint8_t)(UDPInBuffer[1443]);      // RX1 atten
       SetADCAttenuator(eADC1, Byte, true, false);
       SetADCAttenuator(eADC2, Byte2, true, false);
-
-      SetMOX(IsTXMode);
-
       //
       // CWX bits
       //

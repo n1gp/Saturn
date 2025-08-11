@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
+#include <syscall.h>
 #include "../common/saturnregisters.h"
 #include "../common/saturndrivers.h"
 #include "../common/hwaccess.h"
@@ -61,9 +63,6 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
 //
     uint8_t* SpkWriteBuffer = NULL;							// data for DMA to write to spkr
     uint32_t SpkBufferSize = VDMABUFFERSIZE;
-    bool InitError = false;                                 // becomes true if we get an initialisation error
-    unsigned char* SpkReadPtr;								// pointer for reading out a spkr sample
-    unsigned char* SpkHeadPtr;								// ptr to 1st free location in spk memory
     unsigned char* SpkBasePtr;								// ptr to DMA location in spk memory
     uint32_t Depth = 0;
     int DMAWritefile_fd = -1;								// DMA read file device
@@ -76,32 +75,25 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
 
     ThreadData = (struct ThreadSocketData *)arg;
     ThreadData->Active = true;
-    printf("spinning up speaker audio thread with port %d\n", ThreadData->Portid);
+    printf("spinning up speaker audio thread with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
 
     //
     // setup DMA buffer
     //
     posix_memalign((void**)&SpkWriteBuffer, VALIGNMENT, SpkBufferSize);
     if (!SpkWriteBuffer)
-    {
         printf("spkr write buffer allocation failed\n");
-        InitError = true;
-    }
-    SpkReadPtr = SpkWriteBuffer + VBASE;							// offset 4096 bytes into buffer
-    SpkHeadPtr = SpkWriteBuffer + VBASE;
     SpkBasePtr = SpkWriteBuffer + VBASE;
     memset(SpkWriteBuffer, 0, SpkBufferSize);
 
     //
     // open DMA device driver
+    // opened write only to accommodate potential use of a different XDMA device driver
     //
-    DMAWritefile_fd = open(VSPKDMADEVICE, O_RDWR);
+    DMAWritefile_fd = open(VSPKDMADEVICE, O_WRONLY);
     if (DMAWritefile_fd < 0)
-    {
         printf("XDMA write device open failed for spk data\n");
-        InitError = true;
-    }
-	ResetDMAStreamFIFO(eSpkCodecDMA);
+    ResetDMAStreamFIFO(eSpkCodecDMA);
     SetupFIFOMonitorChannel(eSpkCodecDMA, false);
 
   //
@@ -136,13 +128,13 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
         }
         if(size == VSPEAKERAUDIOSIZE)                           // we have received a packet!
         {
-            if(SDRIP2 == 0 && *(uint32_t *)&addr_from.sin_addr.s_addr != SDRIP)
+            if(SDRIP2 == 0 && *(int *)&addr_from.sin_addr.s_addr != SDRIP)
               continue; // stray msg from inactive client
 
             if(StartupCount != 0)                                   // decrement startup message count
                 StartupCount--;
 
-            Client2 = (*(uint32_t *)&addr_from.sin_addr.s_addr == SDRIP2);
+            Client2 = (*(int *)&addr_from.sin_addr.s_addr == SDRIP2);
             if (Client2)
             {
               NewMessageReceived2 = true;
@@ -150,6 +142,7 @@ void *IncomingSpkrAudio(void *arg)                      // listener thread
             }
             else
               NewMessageReceived = true;
+
             RegVal += 1;            //debug
             Depth = ReadFIFOMonitorChannel(eSpkCodecDMA, &FIFOOverflow, &FIFOOverThreshold, &FIFOUnderflow, &Current);        // read the FIFO free locations
             if((StartupCount == 0) && FIFOOverThreshold && UseDebug)

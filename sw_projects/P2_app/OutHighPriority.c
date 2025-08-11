@@ -24,12 +24,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <syscall.h>
 #include "../common/saturnregisters.h"
 #include "../common/saturndrivers.h"
 #include "LDGATU.h"
 
 
 uint8_t GlobalFIFOOverflows = 0;             // FIFO overflow words
+
 
 
 // this runs as its own thread to send outgoing data
@@ -58,13 +61,14 @@ void *OutgoingHighPriority(void *arg)
   bool ATUTuneRequest = false;
   bool FIFOOverflow, FIFOUnderflow, FIFOOverThreshold;      // FIFO flags
   uint8_t FIFOOverflows;
+  uint8_t ADCOverflows = 0;                       // set non zero if ADC overflows detected
 
 //
 // initialise. Create memory buffers and open DMA file devices
 //
   ThreadData = (struct ThreadSocketData *)arg;
   ThreadData->Active = true;
-  printf("spinning up outgoing high priority with port %d\n", ThreadData->Portid);
+  printf("spinning up outgoing high priority with port %d, pid=%ld\n", ThreadData->Portid, syscall(SYS_gettid));
 
 //
 // OK, now the main work
@@ -115,12 +119,13 @@ void *OutgoingHighPriority(void *arg)
       uint16_t SleepCount;                                      // counter for sending next message
       uint8_t PTTBits;                                          // PTT bits - and change means a new message needed
       // create the packet
-      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));           // local copy of PC destination address
+      memcpy(&DestAddr, &reply_addr, sizeof(struct sockaddr_in));   // (RRK not sure this is needed as it is already above) local copy of PC destination address
       ReadStatusRegister();
       PTTBits = (uint8_t)GetP2PTTKeyInputs();
       *(uint8_t *)(UDPBuffer+4) = PTTBits;
-      Byte = (uint8_t)GetADCOverflow();
-      *(uint8_t *)(UDPBuffer+5) = Byte;
+      ADCOverflows |= (uint8_t)GetADCOverflow();                // add in any new overflows
+      *(uint8_t *)(UDPBuffer+5) = ADCOverflows;
+      ADCOverflows = 0;                                         // and clear ready for next test
       Word = (uint16_t)GetAnalogueIn(4);
       *(uint16_t *)(UDPBuffer+6) = htons(Word);                // exciter power
       Word = (uint16_t)GetAnalogueIn(0);
@@ -198,12 +203,13 @@ void *OutgoingHighPriority(void *arg)
           memcpy(&DestAddr, &reply_addr2, sizeof(struct sockaddr_in));           // local copy of PC destination address
           Error = sendmsg(ThreadData -> Socketid, &datagram, 0);
 
-      //
-      // get ATU bit and offer to LDG ATU handler
-      // power requested if bit 2 is zero
-      Byte = ((Byte >> 2) & 1) ^1;
-      ATUTuneRequest = (bool)Byte;
-      RequestATUTune(ATUTuneRequest);
+          //
+          // get ATU bit and offer to LDG ATU handler
+          // power requested if bit 2 is zero
+          Byte = ((Byte >> 2) & 1) ^1;
+          ATUTuneRequest = (bool)Byte;
+          RequestATUTune(ATUTuneRequest);
+
           if(Error == -1)
           {
             printf("High Priority Send Error to 2nd client, errno=%d\n", errno);
@@ -214,18 +220,20 @@ void *OutgoingHighPriority(void *arg)
       }
       else
         SequenceCounter2 = 0;
-
       //
       // now we need to sleep for 1ms (in TX) or 200ms (not in TX)
-      // BUT if any of the PTT or key inputs change, send a message immediately
+      // BUT if any of the PTT or key inputs change, or ADC overflow detected, send a message immediately
       // so break up the 200ms period with smaller sleeps
       // thank you to Rick N1GP for recommending this approach
       //
-      SleepCount = (MOXAsserted)? 2: 400;
+      SleepCount = (MOXAsserted) ? 2 : 400;
       while (SleepCount-- > 0)
       {
         ReadStatusRegister();
         if ((uint8_t)GetP2PTTKeyInputs() != PTTBits)
+          break;
+        ADCOverflows |= (uint8_t)GetADCOverflow();
+        if(ADCOverflows != 0)
           break;
         usleep(500);
       }
